@@ -1,14 +1,18 @@
 package domain
 
-import "gorm.io/gorm"
+type Role string
 
-// 1. User Entity
+const (
+	RoleAdmin Role = "admin"
+	RoleUser  Role = "user"
+)
+
 type User struct {
-	gorm.Model
-	Username string `json:"username" gorm:"unique"`
-	Password string `json:"password"`
-	Role     string `json:"role" gorm:"default:user"`
-	Address  string `json:"address"`
+	ID       uint
+	Username string
+	Password string
+	Role     Role
+	Address  string
 }
 
 // 2. Repository Interface
@@ -25,6 +29,6 @@ type UserService interface {
 	Register(user *User) error
 	Login(username, password string) (string, string, error)
 
-	GetUser(requesterID uint, requesterRole string, targetID uint) (*User, error)
-	UpdateUser(requesterID uint, requesterRole string, targetID uint, input *User) error
+	GetUser(requesterID uint, requesterRole Role, targetID uint) (*User, error)
+	UpdateUser(requesterID uint, requesterRole Role, targetID uint, input *User) error
 }

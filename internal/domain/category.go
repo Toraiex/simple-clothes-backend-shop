@@ -1,28 +1,28 @@
 package domain
 
-import "gorm.io/gorm"
+import "time"
 
-// Category Entity
 type Category struct {
-	gorm.Model
-	Name     string    `json:"name" gorm:"unique;not null"` // ชื่อหมวดหมู่ต้องไม่ซ้ำและไม่ว่าง
-	Products []Product `json:"products,omitempty"`          // เชื่อมโยงกลับไปหา Product
+	ID        uint
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
-// CategoryRepository Interface (กฎสำหรับคนงาน DB)
+// Repository Contract
 type CategoryRepository interface {
 	GetAll() ([]Category, error)
 	GetByID(id uint) (*Category, error)
 	Create(category *Category) error
-	Update(id uint, category *Category) error
+	Update(category *Category) error
 	Delete(id uint) error
 }
 
-// CategoryService Interface (กฎสำหรับสมองของระบบ)
+// Service Contract
 type CategoryService interface {
 	FetchAll() ([]Category, error)
-	CreateCategory(name string) error
-	RemoveCategory(id uint) error
 	GetCategory(id uint) (*Category, error)
+	CreateCategory(name string) error
 	UpdateCategory(id uint, name string) error
+	RemoveCategory(id uint) error
 }

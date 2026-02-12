@@ -1,10 +1,24 @@
 package repository
 
 import (
+	"time"
+
 	"simple-clothes-shop/internal/domain"
 
 	"gorm.io/gorm"
 )
+
+type CategoryModel struct {
+	ID        uint           `gorm:"primaryKey"`
+	Name      string         `gorm:"unique;not null"`
+	Products  []ProductModel `gorm:"foreignKey:CategoryID"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (CategoryModel) TableName() string {
+	return "categories"
+}
 
 type categoryRepository struct {
 	db *gorm.DB
@@ -15,31 +29,84 @@ func NewCategoryRepository(db *gorm.DB) domain.CategoryRepository {
 }
 
 func (r *categoryRepository) GetAll() ([]domain.Category, error) {
+	var models []CategoryModel
+
+	if err := r.db.
+		Preload("Products").
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+
 	var categories []domain.Category
-	// ⚡ Preload("Products") จะสั่งให้ DB ไปดึงสินค้าที่อยู่ในหมวดนั้นๆ มาใส่ใน Slice ให้เลย
-	err := r.db.Preload("Products").Find(&categories).Error
-	return categories, err
+	for _, m := range models {
+		categories = append(categories, toDomainWithProducts(m))
+	}
+
+	return categories, nil
 }
 
 func (r *categoryRepository) GetByID(id uint) (*domain.Category, error) {
-	var category domain.Category
-	// ⚡ ดึงหมวดหมู่เดียว พร้อมสินค้าทั้งหมดในหมวดนั้น
-	err := r.db.Preload("Products").First(&category, id).Error
-	return &category, err
-}
+	var model CategoryModel
+	if err := r.db.First(&model, id).Error; err != nil {
+		return nil, err
+	}
 
-// เพิ่มใน Interface
-// GetCategory(id uint) (*domain.Category, error)
+	category := toDomain(model)
+	return &category, nil
+}
 
 func (r *categoryRepository) Create(category *domain.Category) error {
-	return r.db.Create(category).Error
+	model := toModel(*category)
+
+	if err := r.db.Create(&model).Error; err != nil {
+		return err
+	}
+
+	category.ID = model.ID
+	return nil
 }
 
-func (r *categoryRepository) Update(id uint, category *domain.Category) error {
-	category.ID = id
-	return r.db.Save(category).Error
+func (r *categoryRepository) Update(category *domain.Category) error {
+	model := toModel(*category)
+	return r.db.Save(&model).Error
 }
 
 func (r *categoryRepository) Delete(id uint) error {
-	return r.db.Delete(&domain.Category{}, id).Error
+	return r.db.Delete(&CategoryModel{}, id).Error
+}
+
+func toDomain(model CategoryModel) domain.Category {
+	return domain.Category{
+		ID:        model.ID,
+		Name:      model.Name,
+		CreatedAt: model.CreatedAt,
+		UpdatedAt: model.UpdatedAt,
+	}
+}
+
+func toModel(entity domain.Category) CategoryModel {
+	return CategoryModel{
+		ID:        entity.ID,
+		Name:      entity.Name,
+		CreatedAt: entity.CreatedAt,
+		UpdatedAt: entity.UpdatedAt,
+	}
+}
+func toDomainWithProducts(model CategoryModel) domain.Category {
+	var products []domain.Product
+
+	for _, p := range model.Products {
+		products = append(products, domain.Product{
+			ID:    p.ID,
+			Name:  p.Name,
+			Price: p.Price,
+		})
+	}
+
+	return domain.Category{
+		ID:        model.ID,
+		Name:      model.Name,
+		CreatedAt: model.CreatedAt,
+		UpdatedAt: model.UpdatedAt,
+	}
 }

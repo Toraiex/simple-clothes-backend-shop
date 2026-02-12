@@ -16,6 +16,7 @@ type App struct {
 func NewApp() *App {
 	// 1. Connect DB
 	database.Connect()
+
 	db := database.DB
 
 	if os.Getenv("APP_ENV") == "development" {
@@ -23,6 +24,7 @@ func NewApp() *App {
 	}
 	handlers := NewHandlersContainer(db)
 	// 3. Fiber app
+	database.SeedAdmin()
 	app := fiber.New()
 
 	// 4. Middleware

@@ -1,34 +1,29 @@
 package domain
 
-import (
-	"gorm.io/gorm"
-)
+import "time"
 
-// ==========================================
-// 1. Entities (Models) - หน้าตาของข้อมูล
-// ==========================================
-
-// สินค้าหลัก
 type Product struct {
-	gorm.Model
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Price       float64 `json:"price"`
-	Stock       int     `json:"stock"`
-	CategoryID  uint    `json:"category_id"`
-	Image       string  `json:"image"`
-	// Relationship: 1 Product มีหลาย Variants
-	Variants []ProductVariant `json:"variants" gorm:"foreignKey:ProductID"`
+	ID          uint
+	Name        string
+	Description string
+	Price       float64
+	Stock       int
+	CategoryID  uint
+	Image       string
+	Variants    []ProductVariant
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
-// ตัวเลือกสินค้า (สี/ไซส์)
 type ProductVariant struct {
-	gorm.Model
-	ProductID uint    `json:"product_id"`
-	Color     string  `json:"color"`
-	Size      string  `json:"size"`
-	Price     float64 `json:"price"`
-	Stock     int     `json:"stock"`
+	ID        uint
+	ProductID uint
+	Color     string
+	Size      string
+	Price     float64
+	Stock     int
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // ==========================================

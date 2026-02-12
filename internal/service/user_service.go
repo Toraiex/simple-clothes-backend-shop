@@ -23,16 +23,20 @@ func NewUserService(repo domain.UserRepository) domain.UserService {
 // 1. ลงทะเบียน (Register)
 // ==========================================
 func (s *userService) Register(user *domain.User) error {
-	// 🔒 Hash Password ให้เป็นภาษาต่างดาวก่อนเก็บ
+
+	// ✅ ตั้ง default role ถ้าไม่มี
+	if user.Role == "" {
+		user.Role = domain.RoleUser
+	}
+
+	// 🔒 Hash Password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 14)
 	if err != nil {
 		return err
 	}
 
-	// แทนที่รหัสผ่านเดิมด้วย Hash
 	user.Password = string(hashedPassword)
 
-	// ส่งให้ Repo บันทึกลง DB
 	return s.repo.Create(user)
 }
 
@@ -69,26 +73,26 @@ func (s *userService) Login(username, password string) (string, string, error) {
 	}
 
 	// คืนค่า Token และ Role กลับไป
-	return t, user.Role, nil
+	return t, string(user.Role), nil
 }
 func (s *userService) GetUserByID(id uint) (*domain.User, error) {
 	return s.repo.GetByID(id)
 }
 
-func (s *userService) GetUser(requesterID uint, requesterRole string, targetID uint) (*domain.User, error) {
+func (s *userService) GetUser(requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
 	if requesterRole != "admin" && requesterID != targetID {
 		return nil, errors.New("forbidden")
 	}
 
 	return s.repo.GetByID(targetID)
 }
-func (s *userService) UpdateUser(requesterID uint, requesterRole string, targetID uint, input *domain.User) error {
+func (s *userService) UpdateUser(requesterID uint, requesterRole domain.Role, targetID uint, input *domain.User) error {
 
-	if requesterRole != "admin" && requesterID != targetID {
+	if requesterRole != domain.RoleAdmin && requesterID != targetID {
 		return errors.New("forbidden")
 	}
 
-	if requesterRole != "admin" {
+	if requesterRole != domain.RoleAdmin {
 		input.Role = ""
 	}
 

@@ -1,8 +1,9 @@
 package handler
 
 import (
-	"simple-clothes-shop/internal/domain"
 	"strconv"
+
+	"simple-clothes-shop/internal/domain"
 
 	"github.com/gofiber/fiber/v2"
 )

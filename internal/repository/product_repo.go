@@ -2,6 +2,7 @@ package repository
 
 import (
 	"simple-clothes-shop/internal/domain" // เรียกใช้กฎจาก Domain
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -9,6 +10,37 @@ import (
 // สร้าง Struct เก็บ Database Connection
 type productRepository struct {
 	db *gorm.DB
+}
+
+type ProductModel struct {
+	ID          uint `gorm:"primaryKey"`
+	Name        string
+	Description string
+	Price       float64
+	Stock       int
+	CategoryID  uint
+	Image       string
+	Variants    []ProductVariantModel `gorm:"foreignKey:ProductID"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ProductVariantModel struct {
+	ID        uint `gorm:"primaryKey"`
+	ProductID uint
+	Color     string
+	Size      string
+	Price     float64
+	Stock     int
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (ProductModel) TableName() string {
+	return "products"
+}
+func (ProductVariantModel) TableName() string {
+	return "product_variants"
 }
 
 // ฟังก์ชันสร้างคนงานใหม่ (NewProductRepository)
@@ -31,11 +63,15 @@ func (r *productRepository) GetAll() ([]domain.Product, error) {
 
 // 2. ดึงสินค้าตาม ID
 func (r *productRepository) GetByID(id uint) (*domain.Product, error) {
-	var product domain.Product
-	err := r.db.Preload("Variants").First(&product, id).Error
-	if err != nil {
+	var model ProductModel
+
+	if err := r.db.
+		Preload("Variants").
+		First(&model, id).Error; err != nil {
 		return nil, err
 	}
+
+	product := toDomainProduct(model)
 	return &product, nil
 }
 

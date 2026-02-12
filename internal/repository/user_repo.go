@@ -9,6 +9,13 @@ import (
 type userRepository struct {
 	db *gorm.DB
 }
+type UserModel struct {
+	gorm.Model
+	Username string
+	Password string
+	Role     string
+	Address  string
+}
 
 func NewUserRepository(db *gorm.DB) domain.UserRepository {
 	return &userRepository{db: db}
@@ -16,28 +23,60 @@ func NewUserRepository(db *gorm.DB) domain.UserRepository {
 
 // 1. สร้าง User ใหม่ (ตอนสมัครสมาชิก)
 func (r *userRepository) Create(user *domain.User) error {
-	return r.db.Create(user).Error
+	model := UserModel{
+		Username: user.Username,
+		Password: user.Password,
+		Role:     string(user.Role),
+		Address:  user.Address,
+	}
+
+	return r.db.Create(&model).Error
 }
 
 // 2. ค้นหา User ด้วย Username (ตอน Login)
 func (r *userRepository) GetByUsername(username string) (*domain.User, error) {
-	var user domain.User
-	// ค้นหา record แรกที่ username ตรงกัน
-	if err := r.db.Where("username = ?", username).First(&user).Error; err != nil {
+	var model UserModel
+
+	if err := r.db.Where("username = ?", username).First(&model).Error; err != nil {
 		return nil, err
 	}
-	return &user, nil
+
+	return &domain.User{
+		ID:       model.ID,
+		Username: model.Username,
+		Password: model.Password,
+		Role:     domain.Role(model.Role),
+		Address:  model.Address,
+	}, nil
 }
 func (r *userRepository) GetByID(id uint) (*domain.User, error) {
-	var user domain.User
-	if err := r.db.First(&user, id).Error; err != nil {
+	var model UserModel
+
+	if err := r.db.First(&model, id).Error; err != nil {
 		return nil, err
 	}
-	return &user, nil
+
+	return &domain.User{
+		ID:       model.ID,
+		Username: model.Username,
+		Password: model.Password,
+		Role:     domain.Role(model.Role),
+		Address:  model.Address,
+	}, nil
 }
 
 func (r *userRepository) Update(id uint, user *domain.User) error {
-	return r.db.Model(&domain.User{}).
+	updateData := map[string]interface{}{}
+
+	if user.Address != "" {
+		updateData["address"] = user.Address
+	}
+
+	if user.Role != "" {
+		updateData["role"] = string(user.Role)
+	}
+
+	return r.db.Model(&UserModel{}).
 		Where("id = ?", id).
-		Updates(user).Error
+		Updates(updateData).Error
 }

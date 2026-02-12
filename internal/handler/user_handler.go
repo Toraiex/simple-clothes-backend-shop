@@ -72,7 +72,7 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 	idParam, _ := strconv.Atoi(c.Params("id"))
 
 	requesterID := uint(c.Locals("user_id").(float64))
-	requesterRole := c.Locals("role").(string)
+	requesterRole := domain.Role(c.Locals("role").(string)) // ✅ ตรงนี้แก้
 
 	user, err := h.service.GetUser(requesterID, requesterRole, uint(idParam))
 	if err != nil {
@@ -87,14 +87,28 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	idParam, _ := strconv.Atoi(c.Params("id"))
 
 	requesterID := uint(c.Locals("user_id").(float64))
-	requesterRole := c.Locals("role").(string)
+	requesterRole := domain.Role(c.Locals("role").(string))
 
-	var input domain.User
+	// ✅ สร้าง input variable
+	type UpdateUserInput struct {
+		Address string `json:"address"`
+	}
+
+	var input UpdateUserInput
+
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid input"})
 	}
 
-	err := h.service.UpdateUser(requesterID, requesterRole, uint(idParam), &input)
+	err := h.service.UpdateUser(
+		requesterID,
+		requesterRole,
+		uint(idParam),
+		&domain.User{
+			Address: input.Address,
+		},
+	)
+
 	if err != nil {
 		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
 	}

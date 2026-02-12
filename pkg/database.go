@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log"
 	"os" // สำหรับดึงค่า Environment
-	"simple-clothes-shop/internal/domain"
 
-	// เพิ่มตัวนี้
+	"simple-clothes-shop/internal/repository"
+
+	// เพิ่มตัวนี้v
+	"golang.org/x/crypto/bcrypt"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -40,9 +42,51 @@ func Connect() {
 
 func Migrate() {
 	DB.AutoMigrate(
-		&domain.User{},
-		&domain.Category{},
-		&domain.Product{},
-		&domain.ProductVariant{},
+		&repository.UserModel{},
+		&repository.CategoryModel{},
+		&repository.ProductModel{},
+		&repository.ProductVariantModel{},
+		&repository.UserModel{},
 	)
+}
+func SeedAdmin() {
+	username := os.Getenv("SEED_ADMIN_USERNAME")
+	password := os.Getenv("SEED_ADMIN_PASSWORD")
+
+	// ถ้าไม่ได้ตั้ง ENV → ไม่ seed
+	if username == "" || password == "" {
+		fmt.Println("⚠️ Admin seed skipped (ENV not set)")
+		return
+	}
+
+	var count int64
+
+	// เช็คจาก username (ปลอดภัยกว่าเช็ค role)
+	DB.Model(&repository.UserModel{}).
+		Where("username = ?", username).
+		Count(&count)
+
+	if count > 0 {
+		fmt.Println("ℹ️ Admin already exists, skipping seed")
+		return
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	if err != nil {
+		fmt.Println("❌ Failed to hash admin password")
+		return
+	}
+
+	err = DB.Create(&repository.UserModel{
+		Username: username,
+		Password: string(hashedPassword),
+		Role:     "admin",
+	}).Error
+
+	if err != nil {
+		fmt.Println("❌ Failed to create admin:", err)
+		return
+	}
+
+	fmt.Println("✅ Admin account seeded successfully")
 }
