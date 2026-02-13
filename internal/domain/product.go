@@ -33,19 +33,19 @@ type ProductVariant struct {
 type ProductRepository interface {
 	GetAll() ([]Product, error)
 	GetByID(id uint) (*Product, error)
+	GetByCategoryID(categoryID uint) ([]Product, error)
+	GetWithFilter(categoryID *uint, minPrice *float64, maxPrice *float64) ([]Product, error) // ✅ เพิ่ม
 	Create(product *Product) error
 	Update(id uint, product *Product) error
 	Delete(id uint) error
 }
 
-// ==========================================
-// 3. Service Interface (สัญญาจ้างฝ่ายจัดการ/สมอง)
-// ==========================================
-// ใครที่จะมาเป็น Business Logic ต้องมีฟังก์ชันตามนี้
 type ProductService interface {
 	FetchAll() ([]Product, error)
 	FetchByID(id uint) (*Product, error)
-	CreateProduct(product *Product) error // อาจจะมี Logic เช็คราคา หรือตัดสต็อกในนี้
-	RemoveProduct(id uint) error
+	FetchByCategoryID(categoryID uint) ([]Product, error)
+	FetchWithFilter(categoryID *uint, minPrice *float64, maxPrice *float64) ([]Product, error) // ✅ เพิ่ม
+	CreateProduct(product *Product) error
 	UpdateProduct(id uint, product *Product) error
+	RemoveProduct(id uint) error
 }

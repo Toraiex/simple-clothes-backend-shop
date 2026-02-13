@@ -8,6 +8,20 @@ import (
 
 type userRepository struct {
 	db *gorm.DB
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 type UserModel struct {
 	gorm.Model

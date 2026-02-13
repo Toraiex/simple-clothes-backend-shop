@@ -36,6 +36,34 @@ type ProductVariantModel struct {
 	UpdatedAt time.Time
 }
 
+func toDomainProduct(m ProductModel) domain.Product {
+	var variants []domain.ProductVariant
+
+	for _, v := range m.Variants {
+		variants = append(variants, domain.ProductVariant{
+			ID:        v.ID,
+			ProductID: v.ProductID,
+			Color:     v.Color,
+			Size:      v.Size,
+			Price:     v.Price,
+			Stock:     v.Stock,
+		})
+	}
+
+	return domain.Product{
+		ID:          m.ID,
+		Name:        m.Name,
+		Description: m.Description,
+		Price:       m.Price,
+		Stock:       m.Stock,
+		CategoryID:  m.CategoryID,
+		Image:       m.Image,
+		Variants:    variants,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+	}
+}
+
 func (ProductModel) TableName() string {
 	return "products"
 }
@@ -94,4 +122,36 @@ func (r *productRepository) Update(id uint, product *domain.Product) error {
 // 5. ลบสินค้า
 func (r *productRepository) Delete(id uint) error {
 	return r.db.Delete(&domain.Product{}, id).Error
+}
+func (r *productRepository) GetWithFilter(
+	categoryID *uint,
+	minPrice *float64,
+	maxPrice *float64,
+) ([]domain.Product, error) {
+
+	query := r.db.Model(&ProductModel{}).Preload("Variants")
+
+	if categoryID != nil {
+		query = query.Where("category_id = ?", *categoryID)
+	}
+
+	if minPrice != nil {
+		query = query.Where("price >= ?", *minPrice)
+	}
+
+	if maxPrice != nil {
+		query = query.Where("price <= ?", *maxPrice)
+	}
+
+	var models []ProductModel
+	if err := query.Find(&models).Error; err != nil {
+		return nil, err
+	}
+
+	var products []domain.Product
+	for _, m := range models {
+		products = append(products, toDomainProduct(m))
+	}
+
+	return products, nil
 }

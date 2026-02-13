@@ -110,3 +110,20 @@ func toDomainWithProducts(model CategoryModel) domain.Category {
 		UpdatedAt: model.UpdatedAt,
 	}
 }
+func (r *productRepository) GetByCategoryID(categoryID uint) ([]domain.Product, error) {
+	var models []ProductModel
+
+	if err := r.db.
+		Where("category_id = ?", categoryID).
+		Preload("Variants").
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+
+	var products []domain.Product
+	for _, m := range models {
+		products = append(products, toDomainProduct(m))
+	}
+
+	return products, nil
+}

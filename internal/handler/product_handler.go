@@ -23,10 +23,41 @@ func NewProductHandler(service domain.ProductService) *ProductHandler {
 
 // 🟢 ดึงสินค้าทั้งหมด
 func (h *ProductHandler) GetAll(c *fiber.Ctx) error {
-	products, err := h.service.FetchAll()
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "เกิดข้อผิดพลาดในการดึงข้อมูล"})
+
+	var categoryID *uint
+	var minPrice *float64
+	var maxPrice *float64
+
+	if v := c.Query("category_id"); v != "" {
+		id, err := strconv.Atoi(v)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "invalid category_id"})
+		}
+		temp := uint(id)
+		categoryID = &temp
 	}
+
+	if v := c.Query("min_price"); v != "" {
+		price, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "invalid min_price"})
+		}
+		minPrice = &price
+	}
+
+	if v := c.Query("max_price"); v != "" {
+		price, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "invalid max_price"})
+		}
+		maxPrice = &price
+	}
+
+	products, err := h.service.FetchWithFilter(categoryID, minPrice, maxPrice)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
 	return c.JSON(products)
 }
 

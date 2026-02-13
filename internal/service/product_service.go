@@ -75,3 +75,14 @@ func (s *productService) RemoveProduct(id uint) error {
 	// อาจจะเพิ่ม Logic เช็คว่าสินค้านี้มียอดค้างส่งไหมก่อนลบก็ได้
 	return s.repo.Delete(id)
 }
+func (s *productService) FetchByCategoryID(categoryID uint) ([]domain.Product, error) {
+	return s.repo.GetByCategoryID(categoryID)
+}
+func (s *productService) FetchWithFilter(
+	categoryID *uint,
+	minPrice *float64,
+	maxPrice *float64,
+) ([]domain.Product, error) {
+
+	return s.repo.GetWithFilter(categoryID, minPrice, maxPrice)
+}
