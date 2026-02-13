@@ -42,11 +42,12 @@ func Connect() {
 
 func Migrate() {
 	DB.AutoMigrate(
-		&repository.UserModel{},
 		&repository.CategoryModel{},
 		&repository.ProductModel{},
 		&repository.ProductVariantModel{},
 		&repository.UserModel{},
+		&repository.OrderModel{},
+		&repository.OrderItemModel{},
 	)
 }
 func SeedAdmin() {

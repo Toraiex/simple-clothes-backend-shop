@@ -15,6 +15,7 @@ type HandlersContainer struct {
 	User     *handler.UserHandler
 	Product  *handler.ProductHandler
 	Category *handler.CategoryHandler
+	Order    *handler.OrderHandler
 }
 
 // NewHandlersContainer ทำหน้าที่ Wiring ทุกอย่าง แล้วส่งคืนแค่ก้อน Handlers
@@ -23,6 +24,10 @@ func NewHandlersContainer(db *gorm.DB) *HandlersContainer {
 	userRepo := repository.NewUserRepository(db)
 	productRepo := repository.NewProductRepository(db)
 	categoryRepo := repository.NewCategoryRepository(db)
+
+	orderRepo := repository.NewOrderRepository(db)
+	orderService := service.NewOrderService(orderRepo, productRepo)
+	orderHandler := handler.NewOrderHandler(orderService)
 
 	// 2. Services
 	userService := service.NewUserService(userRepo)
@@ -34,5 +39,7 @@ func NewHandlersContainer(db *gorm.DB) *HandlersContainer {
 		User:     handler.NewUserHandler(userService),
 		Product:  handler.NewProductHandler(productService),
 		Category: handler.NewCategoryHandler(categoryService),
+		Order:    orderHandler, // ✅ เพิ่ม
 	}
+
 }
