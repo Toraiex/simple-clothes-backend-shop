@@ -7,7 +7,7 @@ import (
 	"simple-clothes-shop/internal/repository"
 	"simple-clothes-shop/internal/service"
 
-	"gorm.io/gorm"
+	"github.com/jmoiron/sqlx"
 )
 
 // HandlersContainer ใช้เก็บ Handler ทั้งหมดที่จะส่งไปที่ Route
@@ -19,7 +19,7 @@ type HandlersContainer struct {
 }
 
 // NewHandlersContainer ทำหน้าที่ Wiring ทุกอย่าง แล้วส่งคืนแค่ก้อน Handlers
-func NewHandlersContainer(db *gorm.DB) *HandlersContainer {
+func NewHandlersContainer(db *sqlx.DB) *HandlersContainer {
 	// 1. Repositories
 	userRepo := repository.NewUserRepository(db)
 	productRepo := repository.NewProductRepository(db)

@@ -3,20 +3,13 @@ package database
 import (
 	"fmt"
 	"log"
-	"os" // สำหรับดึงค่า Environment
+	"os"
 
-	"simple-clothes-shop/internal/repository"
-
-	// เพิ่มตัวนี้v
-	"golang.org/x/crypto/bcrypt"
-
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 )
 
-// ประกาศตัวแปร Global ระดับ Package (ตัวใหญ่เพื่อให้คนอื่นเรียกใช้ได้)
-var DB *gorm.DB
+var DB *sqlx.DB
 
 func Connect() {
 	dsn := fmt.Sprintf(
@@ -28,66 +21,13 @@ func Connect() {
 		os.Getenv("DB_PORT"),
 	)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
-
+	db, err := sqlx.Connect("postgres", dsn)
 	if err != nil {
-		log.Fatal("🔥 Failed to connect to database: ", err)
+		log.Fatal("🔥 Failed to connect to database:", err)
 	}
+
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
 
 	DB = db
-
-}
-
-func Migrate() {
-	DB.AutoMigrate(
-		&repository.CategoryModel{},
-		&repository.ProductModel{},
-		&repository.ProductVariantModel{},
-		&repository.UserModel{},
-		&repository.OrderModel{},
-		&repository.OrderItemModel{},
-	)
-}
-func SeedAdmin() {
-	username := os.Getenv("SEED_ADMIN_USERNAME")
-	password := os.Getenv("SEED_ADMIN_PASSWORD")
-
-	// ถ้าไม่ได้ตั้ง ENV → ไม่ seed
-	if username == "" || password == "" {
-		fmt.Println("⚠️ Admin seed skipped (ENV not set)")
-		return
-	}
-
-	var count int64
-
-	// เช็คจาก username (ปลอดภัยกว่าเช็ค role)
-	DB.Model(&repository.UserModel{}).
-		Where("username = ?", username).
-		Count(&count)
-
-	if count > 0 {
-		fmt.Println("ℹ️ Admin already exists, skipping seed")
-		return
-	}
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 14)
-	if err != nil {
-		fmt.Println("❌ Failed to hash admin password")
-		return
-	}
-
-	err = DB.Create(&repository.UserModel{
-		Username: username,
-		Password: string(hashedPassword),
-		Role:     "admin",
-	}).Error
-
-	if err != nil {
-		fmt.Println("❌ Failed to create admin:", err)
-		return
-	}
-
-	fmt.Println("✅ Admin account seeded successfully")
 }

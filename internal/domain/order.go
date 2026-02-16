@@ -12,23 +12,25 @@ const (
 )
 
 type Order struct {
-	ID        uint
-	UserID    uint
-	Status    OrderStatus
-	Items     []OrderItem
-	Total     float64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint        `db:"id"`
+	UserID    uint        `db:"user_id"`
+	Status    OrderStatus `db:"status"`
+	Total     float64     `db:"total"`
+	CreatedAt time.Time   `db:"created_at"`
+	UpdatedAt time.Time   `db:"updated_at"`
+
+	Items []OrderItem `db:"-"`
 }
 
 type OrderItem struct {
-	ID        uint
-	OrderID   uint
-	ProductID uint
-	Quantity  int
-	UnitPrice float64
-	Total     float64
+	ID        uint    `db:"id"`
+	OrderID   uint    `db:"order_id"`
+	ProductID uint    `db:"product_id"`
+	Quantity  int     `db:"quantity"`
+	UnitPrice float64 `db:"unit_price"`
+	Total     float64 `db:"total"`
 }
+
 type OrderRepository interface {
 	Create(order *Order) error
 	GetByID(id uint) (*Order, error)
