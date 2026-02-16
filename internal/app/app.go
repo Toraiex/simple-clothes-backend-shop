@@ -1,7 +1,7 @@
 package app
 
 import (
-	database "simple-clothes-shop/pkg"
+	database "simple-clothes-shop/pkg/database"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -15,8 +15,8 @@ type App struct {
 func NewApp() *App {
 	// 1. Connect DB
 	database.Connect()
-
 	db := database.DB
+	database.RunMigrations(db.DB)
 
 	handlers := NewHandlersContainer(db)
 	app := fiber.New()

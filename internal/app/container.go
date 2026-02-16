@@ -3,6 +3,7 @@
 package app
 
 import (
+	"os"
 	"simple-clothes-shop/internal/handler"
 	"simple-clothes-shop/internal/repository"
 	"simple-clothes-shop/internal/service"
@@ -33,6 +34,10 @@ func NewHandlersContainer(db *sqlx.DB) *HandlersContainer {
 	userService := service.NewUserService(userRepo)
 	productService := service.NewProductService(productRepo, categoryRepo)
 	categoryService := service.NewCategoryService(categoryRepo)
+
+	if os.Getenv("AUTO_SEED_ADMIN") == "true" {
+		SeedAdmin(userService, userRepo)
+	}
 
 	// 3. Return Handlers wrapped in a struct
 	return &HandlersContainer{

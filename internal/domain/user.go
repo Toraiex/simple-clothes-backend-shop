@@ -13,6 +13,7 @@ type User struct {
 	Password string `db:"password"`
 	Role     Role   `db:"role"`
 	Address  string `db:"address"`
+	Phone    string `db:"phone"`
 }
 
 // 2. Repository Interface
