@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"simple-clothes-shop/internal/domain"
+	"sort"
 )
 
 type orderService struct {
@@ -15,15 +16,15 @@ func (s *orderService) CreateOrder(userID uint, items []domain.OrderItem) error 
 	if len(items) == 0 {
 		return errors.New("order ต้องมีอย่างน้อย 1 สินค้า")
 	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].ProductID < items[j].ProductID
+	})
 
 	for i, item := range items {
+
 		product, err := s.productRepo.GetByID(item.ProductID)
 		if err != nil {
 			return err
-		}
-
-		if product.Stock < item.Quantity {
-			return errors.New("สินค้าในสต็อกไม่เพียงพอ")
 		}
 
 		items[i].UnitPrice = product.Price
@@ -89,7 +90,8 @@ func (s *orderService) CancelOrder(userID uint, orderID uint) error {
 		return errors.New("สามารถยกเลิกได้เฉพาะคำสั่งซื้อที่อยู่ในสถานะ pending เท่านั้น")
 	}
 
-	return s.repo.UpdateStatus(orderID, domain.StatusCanceled)
+	return s.repo.CancelAndRestoreStock(orderID)
+
 }
 func (s *orderService) AdminUpdateStatus(orderID uint, newStatus domain.OrderStatus) error {
 

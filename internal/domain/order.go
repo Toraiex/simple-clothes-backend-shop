@@ -36,6 +36,7 @@ type OrderRepository interface {
 	GetByID(id uint) (*Order, error)
 	GetByUserID(userID uint) ([]Order, error)
 	UpdateStatus(id uint, status OrderStatus) error
+	CancelAndRestoreStock(orderID uint) error
 }
 type OrderService interface {
 	CreateOrder(userID uint, items []OrderItem) error

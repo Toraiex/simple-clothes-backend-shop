@@ -20,15 +20,16 @@ func NewProductService(repo domain.ProductRepository, catRepo domain.CategoryRep
 }
 
 func (s *productService) UpdateProduct(id uint, product *domain.Product) error {
-	// 1. เช็คก่อนว่าหมวดหมู่ที่ส่งมามีจริงไหม
-	if product.CategoryID != 0 {
-		_, err := s.categoryRepo.GetByID(product.CategoryID)
-		if err != nil {
-			return errors.New("ไม่พบหมวดหมู่สินค้าที่ระบุ")
-		}
+	// บังคับว่าต้องส่ง CategoryID มาและต้องมีในระบบ
+	if product.CategoryID == 0 {
+		return errors.New("กรุณาระบุหมวดหมู่สินค้า")
 	}
 
-	// 2. สั่งอัปเดต
+	_, err := s.categoryRepo.GetByID(product.CategoryID)
+	if err != nil {
+		return errors.New("ไม่พบหมวดหมู่สินค้าที่ระบุ")
+	}
+
 	return s.repo.Update(id, product)
 }
 

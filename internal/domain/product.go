@@ -3,28 +3,28 @@ package domain
 import "time"
 
 type Product struct {
-	ID          uint      `db:"id"`
-	Name        string    `db:"name"`
-	Description string    `db:"description"`
-	Price       float64   `db:"price"`
-	Stock       int       `db:"stock"`
-	CategoryID  uint      `db:"category_id"` // 🔥 ตัวนี้สำคัญ
-	Image       string    `db:"image"`
-	CreatedAt   time.Time `db:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at"`
+	ID          uint      `db:"id" json:"id"`
+	Name        string    `db:"name" json:"name"`
+	Description string    `db:"description" json:"description"`
+	Price       float64   `db:"price" json:"price"`
+	Stock       int       `db:"stock" json:"stock"`
+	CategoryID  uint      `db:"category_id" json:"category_id"` // 🔥 เพิ่ม json tag ตรงนี้
+	Image       string    `db:"image" json:"image"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 
-	Variants []ProductVariant `db:"-"`
+	Variants []ProductVariant `db:"-" json:"variants,omitempty"`
 }
 
 type ProductVariant struct {
-	ID        uint      `db:"id"`
-	ProductID uint      `db:"product_id"`
-	Color     string    `db:"color"`
-	Size      string    `db:"size"`
-	Price     float64   `db:"price"`
-	Stock     int       `db:"stock"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID        uint      `db:"id" json:"id"`
+	ProductID uint      `db:"product_id" json:"product_id"`
+	Color     string    `db:"color" json:"color"`
+	Size      string    `db:"size" json:"size"`
+	Price     float64   `db:"price" json:"price"`
+	Stock     int       `db:"stock" json:"stock"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // ==========================================

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"simple-clothes-shop/internal/domain"
 
 	"github.com/jmoiron/sqlx"
@@ -20,6 +21,36 @@ func (r *orderRepository) Create(order *domain.Order) error {
 		return err
 	}
 
+	// 🔥 STEP 1: ลด stock ก่อนสร้าง order
+	for _, item := range order.Items {
+
+		res, err := tx.Exec(`
+			UPDATE products
+			SET stock = stock - $1
+			WHERE id = $2 AND stock >= $1
+		`,
+			item.Quantity,
+			item.ProductID,
+		)
+
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		rows, err := res.RowsAffected()
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		if rows == 0 {
+			tx.Rollback()
+			return errors.New("สินค้าในสต็อกไม่เพียงพอ")
+		}
+	}
+
+	// 🔥 STEP 2: สร้าง order
 	var orderID uint
 
 	err = tx.QueryRow(`
@@ -37,6 +68,7 @@ func (r *orderRepository) Create(order *domain.Order) error {
 		return err
 	}
 
+	// 🔥 STEP 3: สร้าง order_items
 	for _, item := range order.Items {
 		_, err := tx.Exec(`
 			INSERT INTO order_items
@@ -58,6 +90,7 @@ func (r *orderRepository) Create(order *domain.Order) error {
 
 	return tx.Commit()
 }
+
 func (r *orderRepository) GetByID(id uint) (*domain.Order, error) {
 
 	var order domain.Order
@@ -134,4 +167,56 @@ func (r *orderRepository) UpdateStatus(id uint, status domain.OrderStatus) error
 	)
 
 	return err
+}
+func (r *orderRepository) CancelAndRestoreStock(orderID uint) error {
+
+	tx, err := r.db.Beginx()
+	if err != nil {
+		return err
+	}
+
+	// 1️⃣ โหลด items ของ order
+	var items []domain.OrderItem
+	err = tx.Select(&items, `
+		SELECT product_id, quantity
+		FROM order_items
+		WHERE order_id=$1
+	`, orderID)
+
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// 2️⃣ คืน stock
+	for _, item := range items {
+
+		_, err := tx.Exec(`
+			UPDATE products
+			SET stock = stock + $1
+			WHERE id = $2
+		`,
+			item.Quantity,
+			item.ProductID,
+		)
+
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	// 3️⃣ update status
+	_, err = tx.Exec(`
+		UPDATE orders
+		SET status='canceled'
+		WHERE id=$1
+	`, orderID)
+
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	return tx.Commit()
 }
