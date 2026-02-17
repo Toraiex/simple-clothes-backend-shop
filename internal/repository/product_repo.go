@@ -1,97 +1,204 @@
 package repository
 
 import (
-	"simple-clothes-shop/internal/domain" // เรียกใช้กฎจาก Domain
-	"time"
+	"fmt"
+	"simple-clothes-shop/internal/domain"
 
-	"gorm.io/gorm"
+	"github.com/jmoiron/sqlx"
 )
 
-// สร้าง Struct เก็บ Database Connection
 type productRepository struct {
-	db *gorm.DB
+	db *sqlx.DB
 }
 
-type ProductModel struct {
-	ID          uint `gorm:"primaryKey"`
-	Name        string
-	Description string
-	Price       float64
-	Stock       int
-	CategoryID  uint
-	Image       string
-	Variants    []ProductVariantModel `gorm:"foreignKey:ProductID"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-}
+var _ domain.ProductRepository = (*productRepository)(nil)
 
-type ProductVariantModel struct {
-	ID        uint `gorm:"primaryKey"`
-	ProductID uint
-	Color     string
-	Size      string
-	Price     float64
-	Stock     int
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-func (ProductModel) TableName() string {
-	return "products"
-}
-func (ProductVariantModel) TableName() string {
-	return "product_variants"
-}
-
-// ฟังก์ชันสร้างคนงานใหม่ (NewProductRepository)
-// รับ DB เข้ามา -> ส่งคืน Interface ออกไป (Dependency Injection)
-func NewProductRepository(db *gorm.DB) domain.ProductRepository {
+func NewProductRepository(db *sqlx.DB) domain.ProductRepository {
 	return &productRepository{db: db}
 }
 
-// ==========================================
-// เริ่มทำงานตามสั่ง (Implement Interface)
-// ==========================================
-
-// 1. ดึงสินค้าทั้งหมด
 func (r *productRepository) GetAll() ([]domain.Product, error) {
+
 	var products []domain.Product
-	// ใช้ Preload("Variants") เพื่อดึงสี/ไซส์ มาด้วยเสมอ
-	err := r.db.Preload("Variants").Find(&products).Error
+
+	err := r.db.Select(&products, `
+		SELECT id, name, description, price, stock,
+		       category_id, image, created_at, updated_at
+		FROM products
+		WHERE stock > 0
+		ORDER BY id DESC
+	`)
+
 	return products, err
 }
 
-// 2. ดึงสินค้าตาม ID
 func (r *productRepository) GetByID(id uint) (*domain.Product, error) {
-	var model ProductModel
 
-	if err := r.db.
-		Preload("Variants").
-		First(&model, id).Error; err != nil {
+	var product domain.Product
+
+	err := r.db.Get(&product, `
+		SELECT id, name, description, price, stock,
+		       category_id, image, created_at, updated_at
+		FROM products
+		WHERE id=$1
+	`, id)
+
+	if err != nil {
 		return nil, err
 	}
 
-	product := toDomainProduct(model)
+	var variants []domain.ProductVariant
+
+	err = r.db.Select(&variants, `
+		SELECT id, product_id, color, size, price, stock
+		FROM product_variants
+		WHERE product_id=$1
+	`, id)
+
+	if err != nil {
+		return nil, err
+	}
+
+	product.Variants = variants
+
 	return &product, nil
 }
 
-// 3. สร้างสินค้าใหม่
+func (r *productRepository) GetByCategoryID(categoryID uint) ([]domain.Product, error) {
+
+	var products []domain.Product
+
+	err := r.db.Select(&products, `
+		SELECT id, name, description, price, stock,
+		       category_id, image, created_at, updated_at
+		FROM products
+		WHERE category_id=$1 AND stock > 0
+		ORDER BY id DESC
+	`, categoryID)
+
+	return products, err
+}
+
 func (r *productRepository) Create(product *domain.Product) error {
-	// GORM ฉลาดพอที่จะบันทึก Variants (ลูก) ให้ด้วย ถ้าเราส่งมาใน Struct
-	return r.db.Create(product).Error
+
+	tx, err := r.db.Beginx()
+	if err != nil {
+		return err
+	}
+
+	err = tx.QueryRow(`
+		INSERT INTO products
+		(name, description, price, stock, category_id, image)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`,
+		product.Name,
+		product.Description,
+		product.Price,
+		product.Stock,
+		product.CategoryID,
+		product.Image,
+	).Scan(&product.ID)
+
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	for _, v := range product.Variants {
+		_, err := tx.Exec(`
+			INSERT INTO product_variants
+			(product_id, color, size, price, stock)
+			VALUES ($1, $2, $3, $4, $5)
+		`,
+			product.ID,
+			v.Color,
+			v.Size,
+			v.Price,
+			v.Stock,
+		)
+
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
-// 4. อัปเดตสินค้า
 func (r *productRepository) Update(id uint, product *domain.Product) error {
-	product.ID = id
-	// ใช้ Save เพื่ออัปเดตทุกฟิลด์ หรือ Updates สำหรับเฉพาะฟิลด์ที่ส่งมา
-	return r.db.Model(&domain.Product{}).
-		Where("id = ?", id).
-		Updates(product).Error
 
+	_, err := r.db.Exec(`
+		UPDATE products
+		SET name=$1,
+		    description=$2,
+		    price=$3,
+		    stock=$4,
+		    category_id=$5,
+		    image=$6,
+		    updated_at=NOW()
+		WHERE id=$7
+	`,
+		product.Name,
+		product.Description,
+		product.Price,
+		product.Stock,
+		product.CategoryID,
+		product.Image,
+		id,
+	)
+
+	return err
 }
 
-// 5. ลบสินค้า
 func (r *productRepository) Delete(id uint) error {
-	return r.db.Delete(&domain.Product{}, id).Error
+
+	_, err := r.db.Exec(`
+		DELETE FROM products
+		WHERE id=$1
+	`, id)
+
+	return err
+}
+func (r *productRepository) GetWithFilter(
+	categoryID *uint,
+	minPrice *float64,
+	maxPrice *float64,
+) ([]domain.Product, error) {
+
+	query := `
+		SELECT id, name, description, price, stock,
+		       category_id, image, created_at, updated_at
+		FROM products
+		WHERE stock > 0
+	`
+
+	args := []interface{}{}
+	argID := 1
+
+	if categoryID != nil {
+		query += " AND category_id=$" + fmt.Sprint(argID)
+		args = append(args, *categoryID)
+		argID++
+	}
+
+	if minPrice != nil {
+		query += " AND price >= $" + fmt.Sprint(argID)
+		args = append(args, *minPrice)
+		argID++
+	}
+
+	if maxPrice != nil {
+		query += " AND price <= $" + fmt.Sprint(argID)
+		args = append(args, *maxPrice)
+		argID++
+	}
+
+	query += " ORDER BY id DESC"
+
+	var products []domain.Product
+
+	err := r.db.Select(&products, query, args...)
+	return products, err
 }

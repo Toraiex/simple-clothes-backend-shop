@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+
 func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api := app.Group("/api")
 
@@ -30,4 +31,11 @@ func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api.Post("/products", handler.AuthMiddleware, handler.IsAdmin, h.Product.Create)
 	api.Put("/products/:id", handler.AuthMiddleware, handler.IsAdmin, h.Product.Update)
 	api.Delete("/products/:id", handler.AuthMiddleware, handler.IsAdmin, h.Product.Delete)
+
+	api.Post("/orders", handler.AuthMiddleware, h.Order.Create)
+	api.Get("/orders/:id", handler.AuthMiddleware, h.Order.GetByID)
+	api.Get("/orders", handler.AuthMiddleware, h.Order.GetMyOrders)
+	api.Put("/orders/:id/cancel", handler.AuthMiddleware, h.Order.Cancel)
+	api.Put("/orders/:id/status", handler.AuthMiddleware, handler.IsAdmin, h.Order.AdminUpdateStatus)
+
 }

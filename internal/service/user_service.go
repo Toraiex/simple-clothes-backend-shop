@@ -24,12 +24,16 @@ func NewUserService(repo domain.UserRepository) domain.UserService {
 // ==========================================
 func (s *userService) Register(user *domain.User) error {
 
-	// ✅ ตั้ง default role ถ้าไม่มี
+	// ✅ check username ซ้ำก่อน
+	existing, _ := s.repo.GetByUsername(user.Username)
+	if existing != nil {
+		return errors.New("username already exists")
+	}
+
 	if user.Role == "" {
 		user.Role = domain.RoleUser
 	}
 
-	// 🔒 Hash Password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 14)
 	if err != nil {
 		return err

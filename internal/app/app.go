@@ -1,8 +1,7 @@
 package app
 
 import (
-	"os"
-	database "simple-clothes-shop/pkg"
+	database "simple-clothes-shop/pkg/database"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -16,17 +15,11 @@ type App struct {
 func NewApp() *App {
 	// 1. Connect DB
 	database.Connect()
-
 	db := database.DB
+	database.RunMigrations(db.DB)
 
-	if os.Getenv("APP_ENV") == "development" {
-		database.Migrate()
-	}
 	handlers := NewHandlersContainer(db)
-	// 3. Fiber app
-	database.SeedAdmin()
 	app := fiber.New()
-
 	// 4. Middleware
 	app.Use(
 		cors.New(cors.Config{
@@ -38,6 +31,9 @@ func NewApp() *App {
 			TimeZone:   "Asia/Bangkok",
 		}),
 	)
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.SendString("Server Running")
+	})
 
 	// 5. Routes
 	setupRoutes(app, handlers)

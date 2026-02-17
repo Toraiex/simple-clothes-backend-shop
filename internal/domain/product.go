@@ -3,27 +3,28 @@ package domain
 import "time"
 
 type Product struct {
-	ID          uint
-	Name        string
-	Description string
-	Price       float64
-	Stock       int
-	CategoryID  uint
-	Image       string
-	Variants    []ProductVariant
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          uint      `db:"id" json:"id"`
+	Name        string    `db:"name" json:"name"`
+	Description string    `db:"description" json:"description"`
+	Price       float64   `db:"price" json:"price"`
+	Stock       int       `db:"stock" json:"stock"`
+	CategoryID  uint      `db:"category_id" json:"category_id"` // 🔥 เพิ่ม json tag ตรงนี้
+	Image       string    `db:"image" json:"image"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+
+	Variants []ProductVariant `db:"-" json:"variants,omitempty"`
 }
 
 type ProductVariant struct {
-	ID        uint
-	ProductID uint
-	Color     string
-	Size      string
-	Price     float64
-	Stock     int
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint      `db:"id" json:"id"`
+	ProductID uint      `db:"product_id" json:"product_id"`
+	Color     string    `db:"color" json:"color"`
+	Size      string    `db:"size" json:"size"`
+	Price     float64   `db:"price" json:"price"`
+	Stock     int       `db:"stock" json:"stock"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // ==========================================
@@ -33,19 +34,19 @@ type ProductVariant struct {
 type ProductRepository interface {
 	GetAll() ([]Product, error)
 	GetByID(id uint) (*Product, error)
+	GetByCategoryID(categoryID uint) ([]Product, error)
+	GetWithFilter(categoryID *uint, minPrice *float64, maxPrice *float64) ([]Product, error) // ✅ เพิ่ม
 	Create(product *Product) error
 	Update(id uint, product *Product) error
 	Delete(id uint) error
 }
 
-// ==========================================
-// 3. Service Interface (สัญญาจ้างฝ่ายจัดการ/สมอง)
-// ==========================================
-// ใครที่จะมาเป็น Business Logic ต้องมีฟังก์ชันตามนี้
 type ProductService interface {
 	FetchAll() ([]Product, error)
 	FetchByID(id uint) (*Product, error)
-	CreateProduct(product *Product) error // อาจจะมี Logic เช็คราคา หรือตัดสต็อกในนี้
-	RemoveProduct(id uint) error
+	FetchByCategoryID(categoryID uint) ([]Product, error)
+	FetchWithFilter(categoryID *uint, minPrice *float64, maxPrice *float64) ([]Product, error) // ✅ เพิ่ม
+	CreateProduct(product *Product) error
 	UpdateProduct(id uint, product *Product) error
+	RemoveProduct(id uint) error
 }

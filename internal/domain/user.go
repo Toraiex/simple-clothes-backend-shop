@@ -8,11 +8,12 @@ const (
 )
 
 type User struct {
-	ID       uint
-	Username string
-	Password string
-	Role     Role
-	Address  string
+	ID       uint   `db:"id"`
+	Username string `db:"username"`
+	Password string `db:"password"`
+	Role     Role   `db:"role"`
+	Address  string `db:"address"`
+	Phone    string `db:"phone"`
 }
 
 // 2. Repository Interface
