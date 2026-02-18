@@ -71,8 +71,18 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 	idParam, _ := strconv.Atoi(c.Params("id"))
 
-	requesterID := uint(c.Locals("user_id").(float64))
-	requesterRole := domain.Role(c.Locals("role").(string)) // ✅ ตรงนี้แก้
+	// ✅ ดึงค่าออกมาเป็น uint ตรงๆ เพราะตอนเซฟใน Middleware เราเซฟเป็น uint ไปแล้ว
+	requesterID, ok := c.Locals("user_id").(uint)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	// ✅ ดึงค่า Role
+	roleStr, ok := c.Locals("role").(string)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	requesterRole := domain.Role(roleStr)
 
 	user, err := h.service.GetUser(requesterID, requesterRole, uint(idParam))
 	if err != nil {
@@ -86,16 +96,24 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	idParam, _ := strconv.Atoi(c.Params("id"))
 
-	requesterID := uint(c.Locals("user_id").(float64))
-	requesterRole := domain.Role(c.Locals("role").(string))
+	// ✅ ใช้ Safe Type Assertion เหมือนกัน
+	requesterID, ok := c.Locals("user_id").(uint)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
 
-	// ✅ สร้าง input variable
+	roleStr, ok := c.Locals("role").(string)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	requesterRole := domain.Role(roleStr)
+
+	// ... โค้ดส่วนรับ input ของเดิม ...
 	type UpdateUserInput struct {
 		Address string `json:"address"`
 	}
 
 	var input UpdateUserInput
-
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid input"})
 	}

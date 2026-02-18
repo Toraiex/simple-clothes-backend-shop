@@ -34,11 +34,14 @@ func AuthMiddleware(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "invalid claims"})
 	}
 
+	// ... (โค้ดดึง Token ด้านบนเหมือนเดิม) ...
+
 	userIDFloat, ok := claims["user_id"].(float64)
 	if !ok {
 		return c.Status(401).JSON(fiber.Map{"error": "invalid user id"})
 	}
 
+	// 1. แปลงเป็น uint
 	userID := uint(userIDFloat)
 
 	role, ok := claims["role"].(string)
@@ -46,7 +49,10 @@ func AuthMiddleware(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "invalid role"})
 	}
 
-	SetUserContext(c, userID, role)
+	// ❌ ลบ SetUserContext(c, userID, role) ออก
+	// ✅ ใช้ c.Locals เพื่อฝากข้อมูลไว้กับ Request นี้โดยตรง
+	c.Locals("user_id", userID) // ตอนนี้ userID เป็นชนิด "uint"
+	c.Locals("role", role)      // role เป็นชนิด "string"
 
 	return c.Next()
 }

@@ -16,7 +16,6 @@ func NewApp() *App {
 	// 1. Connect DB
 	database.Connect()
 	db := database.DB
-	database.RunMigrations(db.DB)
 
 	handlers := NewHandlersContainer(db)
 	app := fiber.New()
