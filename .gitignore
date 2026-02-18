@@ -1,3 +1,21 @@
-.env
-/tmp
+# Editor (ตั้งค่าส่วนตัวของโปรแกรมเขียนโค้ด)
+.vscode/
+
+# Go compiled binaries (ไฟล์ที่เกิดจากการ Build)
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# OS specific (ไฟล์ขยะของระบบปฏิบัติการ)
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment variables (ไฟล์เก็บรหัสผ่านหรือตั้งค่าระบบ ห้ามหลุดขึ้น Git เด็ดขาด!)
+.env
