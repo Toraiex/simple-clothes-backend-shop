@@ -6,17 +6,15 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-
 func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api := app.Group("/api")
 
 	// Auth
 	api.Post("/register", h.User.Register)
 	api.Post("/login", h.User.Login)
-
-	// Users
+	api.Get("/users", handler.AuthMiddleware, handler.IsAdmin, h.User.GetAllUsers) // 👈 เพิ่มใหม่สำหรับ Admin
 	api.Get("/users/:id", handler.AuthMiddleware, h.User.GetUser)
-	api.Put("/users/:id", handler.AuthMiddleware, h.User.UpdateUser)
+	api.Patch("/users/:id", handler.AuthMiddleware, h.User.UpdateUser) // 👈 เปลี่ยนจาก Put เป็น Patch ให้ถูกต้องตามหลั
 
 	// Categories
 	api.Post("/categories", handler.AuthMiddleware, handler.IsAdmin, h.Category.Create)
@@ -29,8 +27,10 @@ func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api.Get("/products", h.Product.GetAll)
 	api.Get("/products/:id", h.Product.GetByID)
 	api.Post("/products", handler.AuthMiddleware, handler.IsAdmin, h.Product.Create)
-	api.Put("/products/:id", handler.AuthMiddleware, handler.IsAdmin, h.Product.Update)
+	// เปลี่ยนบรรทัดนี้
+	api.Patch("/products/:id", handler.AuthMiddleware, handler.IsAdmin, h.Product.Update)
 	api.Delete("/products/:id", handler.AuthMiddleware, handler.IsAdmin, h.Product.Delete)
+	api.Delete("/products/variants/:id", handler.AuthMiddleware, handler.IsAdmin, h.Product.DeleteVariant)
 
 	api.Post("/orders", handler.AuthMiddleware, h.Order.Create)
 	api.Get("/orders/:id", handler.AuthMiddleware, h.Order.GetByID)

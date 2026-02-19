@@ -78,3 +78,22 @@ func (r *userRepository) Update(id uint, user *domain.User) error {
 
 	return err
 }
+
+// ... (โค้ดเดิม) ...
+
+func (r *userRepository) GetAll() ([]*domain.User, error) {
+	var users []*domain.User
+
+	// เลือกดึงมาเฉพาะฟิลด์ที่ปลอดภัย (ไม่ดึง Password)
+	err := r.db.Select(&users, `
+		SELECT id, username, role, address, phone
+		FROM users
+		ORDER BY id ASC
+	`)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return users, nil
+}

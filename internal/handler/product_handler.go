@@ -119,3 +119,24 @@ func (h *ProductHandler) Update(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "อัปเดตสินค้าสำเร็จ"})
 }
+
+// 🔒 ลบ Variant (สี/ไซส์)
+func (h *ProductHandler) DeleteVariant(c *fiber.Ctx) error {
+	// 1. ดึง ID จาก URL parameter
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "ID ไม่ถูกต้อง"})
+	}
+
+	// 2. เรียก Service ให้ลบ Variant
+	err = h.service.RemoveVariant(uint(id))
+	if err != nil {
+		// เช็ค Error ถ้าหาไม่เจอ
+		if err.Error() == "ไม่พบ Variant นี้ในระบบ (ลบไม่สำเร็จ)" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"message": "ลบตัวเลือกสินค้า (Variant) สำเร็จ"})
+}

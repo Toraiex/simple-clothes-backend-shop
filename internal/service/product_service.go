@@ -20,17 +20,53 @@ func NewProductService(repo domain.ProductRepository, catRepo domain.CategoryRep
 }
 
 func (s *productService) UpdateProduct(id uint, product *domain.Product) error {
-	// บังคับว่าต้องส่ง CategoryID มาและต้องมีในระบบ
-	if product.CategoryID == 0 {
-		return errors.New("กรุณาระบุหมวดหมู่สินค้า")
-	}
-
-	_, err := s.categoryRepo.GetByID(product.CategoryID)
+	// 1. FETCH: ดึงข้อมูลสินค้า "ตัวเก่า" จาก Database ออกมาก่อน
+	existingProduct, err := s.repo.GetByID(id)
 	if err != nil {
-		return errors.New("ไม่พบหมวดหมู่สินค้าที่ระบุ")
+		return errors.New("ไม่พบสินค้าที่ต้องการแก้ไข")
 	}
 
-	return s.repo.Update(id, product)
+	// 2. MERGE: เอาข้อมูลใหม่ไป "แปะทับ" ข้อมูลเก่า (เฉพาะอันที่ส่งมา)
+
+	// ถ้ามีการส่งชื่อมาใหม่ (ไม่ใช่ค่าว่าง) ให้ใช้ชื่อใหม่
+	if product.Name != "" {
+		existingProduct.Name = product.Name
+	}
+	// ถ้ามีการส่งรายละเอียดมาใหม่
+	if product.Description != "" {
+		existingProduct.Description = product.Description
+	}
+	// ถ้าส่งราคามา (และมากกว่า 0)
+	if product.Price > 0 {
+		existingProduct.Price = product.Price
+	}
+	// ถ้าส่งสต็อกมา (สต็อกเป็น 0 ได้ ต้องระวัง logic นี้ถ้าอยากให้แก้เป็น 0 ได้จริงๆ อาจต้องใช้ Pointer แต่เบื้องต้นใช้แบบนี้ก่อนได้)
+	if product.Stock >= 0 {
+		existingProduct.Stock = product.Stock
+	}
+	// ถ้าเปลี่ยนหมวดหมู่
+	if product.CategoryID != 0 {
+		// เช็คก่อนว่าหมวดหมู่ใหม่มีจริงไหม
+		_, err := s.categoryRepo.GetByID(product.CategoryID)
+		if err != nil {
+			return errors.New("ไม่พบหมวดหมู่สินค้าที่ระบุ")
+		}
+		existingProduct.CategoryID = product.CategoryID
+	}
+	// ถ้าเปลี่ยนรูป
+	if product.Image != "" {
+		existingProduct.Image = product.Image
+	}
+
+	// 3. VARIANTS: ส่ง Variants ใหม่ไปให้ Repo จัดการต่อ (Repo เราเขียน Logic Upsert ไว้แล้ว)
+	// แต่เราต้องแนบ Variants ที่ส่งมาใหม่ เข้าไปใน existingProduct
+	if len(product.Variants) > 0 {
+		existingProduct.Variants = product.Variants
+	}
+
+	// 4. SAVE: ส่งข้อมูลที่ "ผสานร่างเสร็จแล้ว" กลับไปบันทึก
+	// (Repo จะมองว่าเป็น PUT เหมือนเดิม คือเซฟทับทุกช่อง แต่ตอนนี้ข้อมูลเราครบแล้ว)
+	return s.repo.Update(id, existingProduct)
 }
 
 // ==========================================
@@ -86,4 +122,11 @@ func (s *productService) FetchWithFilter(
 ) ([]domain.Product, error) {
 
 	return s.repo.GetWithFilter(categoryID, minPrice, maxPrice)
+}
+
+// ... (ฟังก์ชันอื่นเดิม) ...
+
+// ✅ เพิ่มฟังก์ชันนี้ลงไปท้ายไฟล์
+func (s *productService) RemoveVariant(variantID uint) error {
+	return s.repo.DeleteVariant(variantID)
 }
