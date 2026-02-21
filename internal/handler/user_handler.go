@@ -18,33 +18,44 @@ func NewUserHandler(service domain.UserService) *UserHandler {
 // ==========================================
 // 1. ลงทะเบียน (Register)
 // ==========================================
+// ==========================================
+// 1. ลงทะเบียน (Register)
+// ==========================================
 func (h *UserHandler) Register(c *fiber.Ctx) error {
-	var user domain.User
+	// ✅ 1. สร้าง Struct รับข้อมูลเฉพาะกิจ (ไม่ต้องมี json:"-")
+	type RegisterInput struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Address  string `json:"address"`
+		Phone    string `json:"phone"`
+	}
 
-	// แปลง JSON เป็น Struct
-	if err := c.BodyParser(&user); err != nil {
+	var input RegisterInput
+	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
-	// ส่งให้ Service (สมอง) จัดการ
+	// ✅ 2. ประกอบร่างเป็น Domain Model (ย้ายค่าจาก Input มาใส่ User)
+	user := domain.User{
+		Username: input.Username,
+		Password: input.Password, // คราวนี้รหัสผ่าน 1234 มาเต็มๆ แล้ว!
+		Address:  input.Address,
+		Phone:    input.Phone,
+	}
+
+	// ✅ 3. ส่งให้ Service จัดการ
 	if err := h.service.Register(&user); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// ลบ Password ออกจาก Response เพื่อความปลอดภัย
-	user.Password = ""
-
+	// 💡 ไม่ต้องสั่ง user.Password = "" แล้ว เพราะ json:"-" ใน Domain จะบล็อกให้เองตอน Return
 	return c.Status(201).JSON(fiber.Map{
 		"message": "สมัครสมาชิกสำเร็จ",
 		"user":    user,
 	})
 }
 
-// ==========================================
-// 2. เข้าสู่ระบบ (Login)
-// ==========================================
 func (h *UserHandler) Login(c *fiber.Ctx) error {
-	// สร้าง Struct เล็กๆ สำหรับรับค่า Login โดยเฉพาะ (DTO)
 	type LoginInput struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -55,19 +66,23 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
-	// เรียก Service ให้เช็ค Login และขอ Token
 	token, role, err := h.service.Login(input.Username, input.Password)
 	if err != nil {
-		return c.Status(401).JSON(fiber.Map{"error": err.Error()}) // 401 Unauthorized
+		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// ส่ง Token กลับไปให้ลูกค้า
+	// ✅ ต้อง Return ตรงนี้เลย เพื่อจบการทำงานของ Login
 	return c.JSON(fiber.Map{
 		"message": "เข้าสู่ระบบสำเร็จ",
 		"token":   token,
 		"role":    role,
 	})
 }
+
+// ==========================================
+// 2. เข้าสู่ระบบ (Login)
+// ==========================================
+
 func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 	idParam, _ := strconv.Atoi(c.Params("id"))
 

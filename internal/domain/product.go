@@ -1,30 +1,34 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"simple-clothes-shop/pkg/datatype" // 👈 Import เครื่องมือของเราเข้ามา
+)
 
 type Product struct {
-	ID          uint      `db:"id" json:"id"`
-	Name        string    `db:"name" json:"name"`
-	Description string    `db:"description" json:"description"`
-	Price       float64   `db:"price" json:"price"`
-	Stock       int       `db:"stock" json:"stock"`
-	CategoryID  uint      `db:"category_id" json:"category_id"` // 🔥 เพิ่ม json tag ตรงนี้
-	Image       string    `db:"image" json:"image"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+	ID          uint                     `db:"id" json:"id"`
+	Name        string                   `db:"name" json:"name"`
+	Description string                   `db:"description" json:"description"`
+	Price       float64                  `db:"price" json:"price"`
+	Stock       int                      `db:"stock" json:"stock"`
+	CategoryID  uint                     `db:"category_id" json:"category_id"`
+	Images      datatype.JSONStringArray `db:"images" json:"images"` // 👈 ใช้ Type จาก pkg
+	CreatedAt   time.Time                `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time                `db:"updated_at" json:"updated_at"`
 
 	Variants []ProductVariant `db:"-" json:"variants,omitempty"`
 }
 
 type ProductVariant struct {
-	ID        uint      `db:"id" json:"id"`
-	ProductID uint      `db:"product_id" json:"product_id"`
-	Color     string    `db:"color" json:"color"`
-	Size      string    `db:"size" json:"size"`
-	Price     float64   `db:"price" json:"price"`
-	Stock     int       `db:"stock" json:"stock"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	ID         uint                    `db:"id" json:"id"`
+	ProductID  uint                    `db:"product_id" json:"product_id"`
+	SKU        string                  `db:"sku" json:"sku"`
+	Price      float64                 `db:"price" json:"price"`
+	Stock      int                     `db:"stock" json:"stock"`
+	Attributes datatype.JSONAttributes `db:"attributes" json:"attributes"` // 👈 ใช้ Type จาก pkg
+	CreatedAt  time.Time               `db:"created_at" json:"created_at"`
+	UpdatedAt  time.Time               `db:"updated_at" json:"updated_at"`
 }
 
 // ==========================================

@@ -32,6 +32,12 @@ func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api.Delete("/products/:id", handler.AuthMiddleware, handler.IsAdmin, h.Product.Delete)
 	api.Delete("/products/variants/:id", handler.AuthMiddleware, handler.IsAdmin, h.Product.DeleteVariant)
 
+	// Carts (ตะกร้าสินค้าของฉัน)
+	api.Get("/cart", handler.AuthMiddleware, h.Cart.GetMyCart)                   // ดูตะกร้า
+	api.Post("/cart", handler.AuthMiddleware, h.Cart.AddToCart)                  // หยิบของใส่ตะกร้า
+	api.Patch("/cart/items/:id", handler.AuthMiddleware, h.Cart.UpdateQuantity)  // แก้ไขจำนวนชิ้น
+	api.Delete("/cart/items/:id", handler.AuthMiddleware, h.Cart.RemoveFromCart) // ลบของทิ้ง
+
 	api.Post("/orders", handler.AuthMiddleware, h.Order.Create)
 	api.Get("/orders/:id", handler.AuthMiddleware, h.Order.GetByID)
 	api.Get("/orders", handler.AuthMiddleware, h.Order.GetMyOrders)

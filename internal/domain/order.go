@@ -12,34 +12,47 @@ const (
 )
 
 type Order struct {
-	ID        uint        `db:"id"`
-	UserID    uint        `db:"user_id"`
-	Status    OrderStatus `db:"status"`
-	Total     float64     `db:"total"`
-	CreatedAt time.Time   `db:"created_at"`
-	UpdatedAt time.Time   `db:"updated_at"`
+	ID        uint        `db:"id" json:"id"`
+	UserID    uint        `db:"user_id" json:"user_id"`
+	Status    OrderStatus `db:"status" json:"status"`
+	Total     float64     `db:"total" json:"total"`
+	CreatedAt time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time   `db:"updated_at" json:"updated_at"`
 
-	Items []OrderItem `db:"-"`
+	Items []OrderItem `db:"-" json:"items"`
 }
 
 type OrderItem struct {
-	ID        uint    `db:"id"`
-	OrderID   uint    `db:"order_id"`
-	ProductID uint    `db:"product_id"`
-	Quantity  int     `db:"quantity"`
-	UnitPrice float64 `db:"unit_price"`
-	Total     float64 `db:"total"`
+	ID        uint    `db:"id" json:"id"`
+	OrderID   uint    `db:"order_id" json:"order_id"`
+	VariantID uint    `db:"variant_id" json:"variant_id"` // 👈 เปลี่ยนเป็น VariantID
+	Quantity  int     `db:"quantity" json:"quantity"`
+	UnitPrice float64 `db:"unit_price" json:"unit_price"`
+	Total     float64 `db:"total" json:"total"`
+
+	// 💡 เอาไว้โชว์ข้อมูลตอนลูกค้าเรียกดูประวัติการสั่งซื้อ (Order History)
+	Variant *ProductVariant `db:"-" json:"variant,omitempty"`
+	Product *Product        `db:"-" json:"product,omitempty"`
 }
 
+// ----------------------------------------------------
+// Interfaces
+// ----------------------------------------------------
+
 type OrderRepository interface {
-	Create(order *Order) error
+	// 👈 เปลี่ยนพารามิเตอร์: รับ CartItems เข้ามาแทน เพื่อเอาไปสร้าง Order
+	CreateOrderFromCart(userID uint, cartItems []CartItem, totalAmount float64) (*Order, error)
+
 	GetByID(id uint) (*Order, error)
 	GetByUserID(userID uint) ([]Order, error)
 	UpdateStatus(id uint, status OrderStatus) error
 	CancelAndRestoreStock(orderID uint) error
 }
+
 type OrderService interface {
-	CreateOrder(userID uint, items []OrderItem) error
+	// 👈 เปลี่ยนพารามิเตอร์: ฟังก์ชัน Checkout ต้องการแค่ UserID เท่านั้น!
+	Checkout(userID uint) error
+
 	GetByUserID(userID uint) ([]Order, error)
 	GetByID(id uint) (*Order, error)
 	GetByIDForUser(userID uint, orderID uint) (*Order, error)

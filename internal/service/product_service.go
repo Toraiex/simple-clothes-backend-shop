@@ -54,8 +54,8 @@ func (s *productService) UpdateProduct(id uint, product *domain.Product) error {
 		existingProduct.CategoryID = product.CategoryID
 	}
 	// ถ้าเปลี่ยนรูป
-	if product.Image != "" {
-		existingProduct.Image = product.Image
+	if len(product.Images) > 0 {
+		existingProduct.Images = product.Images
 	}
 
 	// 3. VARIANTS: ส่ง Variants ใหม่ไปให้ Repo จัดการต่อ (Repo เราเขียน Logic Upsert ไว้แล้ว)
