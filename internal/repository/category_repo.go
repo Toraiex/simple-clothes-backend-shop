@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"simple-clothes-shop/internal/domain"
 
 	"github.com/jmoiron/sqlx"
@@ -66,10 +67,26 @@ func (r *categoryRepository) Update(category *domain.Category) error {
 }
 
 func (r *categoryRepository) Delete(id uint) error {
-	_, err := r.db.Exec(`
+	// 1. สั่งรันคำสั่งลบ และเก็บผลลัพธ์ (result) ไว้
+	result, err := r.db.Exec(`
 		DELETE FROM categories
 		WHERE id=$1
 	`, id)
 
-	return err
+	if err != nil {
+		return err // Error จาก Database (เช่น เน็ตหลุด, syntax ผิด)
+	}
+
+	// 2. ถาม Database ว่า "ตกลงเมื่อกี้ลบไปกี่แถว?"
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	// 3. ถ้าลบไป 0 แถว แปลว่าไม่เจอ ID นี้ในระบบแต่แรก
+	if rowsAffected == 0 {
+		return errors.New("ไม่พบข้อมูลหมวดหมู่นี้ในระบบ (ลบไม่สำเร็จ)")
+	}
+
+	return nil
 }

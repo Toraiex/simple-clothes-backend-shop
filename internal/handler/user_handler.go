@@ -71,8 +71,18 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 	idParam, _ := strconv.Atoi(c.Params("id"))
 
-	requesterID := uint(c.Locals("user_id").(float64))
-	requesterRole := domain.Role(c.Locals("role").(string)) // ✅ ตรงนี้แก้
+	// ✅ ดึงค่าออกมาเป็น uint ตรงๆ เพราะตอนเซฟใน Middleware เราเซฟเป็น uint ไปแล้ว
+	requesterID, ok := c.Locals("user_id").(uint)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	// ✅ ดึงค่า Role
+	roleStr, ok := c.Locals("role").(string)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	requesterRole := domain.Role(roleStr)
 
 	user, err := h.service.GetUser(requesterID, requesterRole, uint(idParam))
 	if err != nil {
@@ -83,35 +93,79 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 	return c.JSON(user)
 }
 
+// ... (ส่วนหน้าของไฟล์ และฟังก์ชัน Register, Login, GetUser เหมือนเดิม) ...
+
+// ==========================================
+// ดูรายชื่อผู้ใช้งานทั้งหมด (GetAllUsers)
+// ==========================================
+func (h *UserHandler) GetAllUsers(c *fiber.Ctx) error {
+	roleStr, ok := c.Locals("role").(string)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	users, err := h.service.GetAllUsers(domain.Role(roleStr))
+	if err != nil {
+		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "ดึงข้อมูลผู้ใช้งานสำเร็จ",
+		"data":    users,
+	})
+}
+
+// ==========================================
+// อัปเดตข้อมูลผู้ใช้ (UpdateUser)
+// ==========================================
 func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
-	idParam, _ := strconv.Atoi(c.Params("id"))
+	idParam, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "ID ผู้ใช้งานไม่ถูกต้อง"})
+	}
 
-	requesterID := uint(c.Locals("user_id").(float64))
-	requesterRole := domain.Role(c.Locals("role").(string))
+	requesterID, ok := c.Locals("user_id").(uint)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
 
-	// ✅ สร้าง input variable
+	roleStr, ok := c.Locals("role").(string)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	requesterRole := domain.Role(roleStr)
+
+	// สร้าง DTO เพื่อบังคับให้ Client ส่งมาได้แค่ 3 ฟิลด์นี้เท่านั้น (ป้องกันคนเนียนส่ง Password มาแก้)
 	type UpdateUserInput struct {
 		Address string `json:"address"`
+		Phone   string `json:"phone"`
+		Role    string `json:"role"`
 	}
 
 	var input UpdateUserInput
-
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid input"})
+		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูล JSON ไม่ถูกต้อง"})
 	}
 
-	err := h.service.UpdateUser(
+	// นำเข้า Service
+	err = h.service.UpdateUser(
 		requesterID,
 		requesterRole,
 		uint(idParam),
 		&domain.User{
 			Address: input.Address,
+			Phone:   input.Phone,
+			Role:    domain.Role(input.Role), // แปลงเป็น type Role ก่อนส่ง
 		},
 	)
 
 	if err != nil {
+		// จับ Error ถ้าเป็น 404 ไม่พบผู้ใช้ หรือ 403 Forbidden
+		if err.Error() == "ไม่พบข้อมูลผู้ใช้งานนี้ในระบบ" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{"message": "user updated"})
+	return c.JSON(fiber.Map{"message": "อัปเดตข้อมูลผู้ใช้งานสำเร็จ"})
 }

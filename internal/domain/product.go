@@ -39,6 +39,7 @@ type ProductRepository interface {
 	Create(product *Product) error
 	Update(id uint, product *Product) error
 	Delete(id uint) error
+	DeleteVariant(id uint) error
 }
 
 type ProductService interface {
@@ -49,4 +50,5 @@ type ProductService interface {
 	CreateProduct(product *Product) error
 	UpdateProduct(id uint, product *Product) error
 	RemoveProduct(id uint) error
+	RemoveVariant(variantID uint) error
 }

@@ -128,28 +128,57 @@ func (r *productRepository) Create(product *domain.Product) error {
 }
 
 func (r *productRepository) Update(id uint, product *domain.Product) error {
+	// 1. เริ่ม Transaction (เพราะเราต้องแก้หลายตาราง)
+	tx, err := r.db.Beginx()
+	if err != nil {
+		return err
+	}
 
-	_, err := r.db.Exec(`
-		UPDATE products
-		SET name=$1,
-		    description=$2,
-		    price=$3,
-		    stock=$4,
-		    category_id=$5,
-		    image=$6,
-		    updated_at=NOW()
-		WHERE id=$7
-	`,
-		product.Name,
-		product.Description,
-		product.Price,
-		product.Stock,
-		product.CategoryID,
-		product.Image,
-		id,
+	// 2. อัปเดตข้อมูลสินค้าหลัก (Product)
+	// ใช้ COALESCE หรือเช็คก่อนอัปเดต ถ้าอยากทำ Patch แบบละเอียด แต่ในที่นี้ Update หมดตามฟิลด์ที่ส่งมา
+	_, err = tx.Exec(`
+        UPDATE products
+        SET name=$1, description=$2, price=$3, stock=$4, category_id=$5, image=$6, updated_at=NOW()
+        WHERE id=$7
+    `,
+		product.Name, product.Description, product.Price,
+		product.Stock, product.CategoryID, product.Image, id,
 	)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
 
-	return err
+	// 3. จัดการ Variants (Loop เช็คทีละตัว)
+	for _, v := range product.Variants {
+		if v.ID == 0 {
+			// ✅ กรณีที่ 1: ไม่มี ID ส่งมา = "สร้าง Variant ใหม่" (Insert)
+			_, err := tx.Exec(`
+                INSERT INTO product_variants (product_id, color, size, price, stock)
+                VALUES ($1, $2, $3, $4, $5)
+            `, id, v.Color, v.Size, v.Price, v.Stock)
+
+			if err != nil {
+				tx.Rollback()
+				return err
+			}
+		} else {
+			// ✅ กรณีที่ 2: มี ID ส่งมา = "แก้ไข Variant เดิม" (Update)
+			_, err := tx.Exec(`
+                UPDATE product_variants
+                SET color=$1, size=$2, price=$3, stock=$4, updated_at=NOW()
+                WHERE id=$5 AND product_id=$6
+            `, v.Color, v.Size, v.Price, v.Stock, v.ID, id)
+
+			if err != nil {
+				tx.Rollback()
+				return err
+			}
+		}
+	}
+
+	// 4. จบงาน
+	return tx.Commit()
 }
 
 func (r *productRepository) Delete(id uint) error {
@@ -159,6 +188,12 @@ func (r *productRepository) Delete(id uint) error {
 		WHERE id=$1
 	`, id)
 
+	return err
+}
+
+// เพิ่มใน productRepository
+func (r *productRepository) DeleteVariant(variantID uint) error {
+	_, err := r.db.Exec(`DELETE FROM product_variants WHERE id=$1`, variantID)
 	return err
 }
 func (r *productRepository) GetWithFilter(
