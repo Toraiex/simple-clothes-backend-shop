@@ -15,7 +15,12 @@ type User struct {
 	Password string `db:"password" json:"-"` // เพิ่ม json:"-" เพื่อป้องกันรหัสผ่านหลุดตอนส่ง Response อัตโนมัติ
 	Role     Role   `db:"role"`
 	Address  string `db:"address"`
-	Phone    string `db:"phone"`
+	Phone    string `db:"phone" json:"phone"`
+
+	Email        string     `db:"email" json:"email"`
+	IsVerified   bool       `db:"is_verified" json:"is_verified"`
+	OTPCode      string     `db:"otp_code" json:"-"`
+	OTPExpiresAt *time.Time `db:"otp_expires_at" json:"-"`
 }
 
 // โครงสร้างข้อมูลให้ตรงกับตาราง sessions
@@ -37,6 +42,9 @@ type UserRepository interface {
 	GetByID(id uint) (*User, error)
 	Update(id uint, user *User) error
 	GetAll() ([]*User, error)
+	GetByEmail(email string) (*User, error)
+	UpdateVerificationStatus(userID uint) error
+	UpdateOTP(userID uint, otp string, expiresAt time.Time) error
 }
 
 // 3. Service Interface
@@ -48,6 +56,8 @@ type UserService interface {
 	GetAllUsers(requesterRole Role) ([]*User, error)
 	RefreshAccessToken(refreshToken string) (string, string, error)
 	Logout(refreshToken string) error
+	VerifyEmail(email string, otp string) error
+	ResendOTP(email string) error
 }
 
 type SessionRepository interface {

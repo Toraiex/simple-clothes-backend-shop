@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"math/rand"
 	"os"
 	"time"
 
@@ -14,13 +16,15 @@ import (
 type userService struct {
 	userRepo    domain.UserRepository
 	sessionRepo domain.SessionRepository
+	emailSvc    EmailService
 }
 
 // ✅ 2. อัปเดต Constructor ให้รับ SessionRepository เข้ามาด้วย
-func NewUserService(userRepo domain.UserRepository, sessionRepo domain.SessionRepository) domain.UserService {
+func NewUserService(userRepo domain.UserRepository, sessionRepo domain.SessionRepository, emailSvc EmailService) domain.UserService {
 	return &userService{
 		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
+		emailSvc:    emailSvc,
 	}
 }
 
@@ -28,8 +32,6 @@ func NewUserService(userRepo domain.UserRepository, sessionRepo domain.SessionRe
 // 1. ลงทะเบียน (Register)
 // ==========================================
 func (s *userService) Register(user *domain.User) error {
-
-	// ✅ check username ซ้ำก่อน
 	existing, _ := s.userRepo.GetByUsername(user.Username)
 	if existing != nil {
 		return errors.New("username already exists")
@@ -43,10 +45,37 @@ func (s *userService) Register(user *domain.User) error {
 	if err != nil {
 		return err
 	}
-
 	user.Password = string(hashedPassword)
 
-	return s.userRepo.Create(user)
+	// ✅ 3. สร้าง OTP และกำหนดวันหมดอายุ (เช่น 15 นาที)
+	otp := generateOTP() // เรียกใช้ฟังก์ชันสุ่มตัวเลขที่เราสร้างไว้
+	expiresAt := time.Now().Add(15 * time.Minute)
+
+	user.OTPCode = otp
+	user.OTPExpiresAt = &expiresAt
+	user.IsVerified = false // เพิ่งสมัคร ยังไม่ได้ยืนยัน
+
+	// 4. บันทึกลง Database
+	err = s.userRepo.Create(user)
+	if err != nil {
+		return err
+	}
+
+	// ✅ 5. ภารกิจส่งอีเมล! (ถ้ามี Email กรอกมา)
+	if user.Email != "" {
+		// 💡 แอบใช้ Goroutine (go) เพื่อให้มันส่งอีเมลอยู่เบื้องหลัง
+		// ลูกค้าจะได้ไม่ต้องรอโหลดหน้าเว็บนานๆ ตอนกดสมัครครับ (นี่คือท่ามาตรฐานเลย!)
+		go func() {
+			err := s.emailSvc.SendVerificationEmail(user.Email, otp)
+			if err != nil {
+				fmt.Println("❌ ส่งอีเมลไม่สำเร็จ:", err)
+			} else {
+				fmt.Println("✅ ส่ง OTP ไปที่", user.Email, "สำเร็จแล้ว!")
+			}
+		}()
+	}
+
+	return nil
 }
 
 func (s *userService) Login(username, password, userAgent, clientIP string) (string, string, string, error) {
@@ -233,6 +262,63 @@ func (s *userService) Logout(refreshToken string) error {
 	if err != nil {
 		return errors.New("เกิดข้อผิดพลาดในการออกจากระบบ")
 	}
+
+	return nil
+}
+func generateOTP() string {
+	// สุ่มตัวเลขตั้งแต่ 100000 ถึง 999999
+	return fmt.Sprintf("%06d", rand.Intn(900000)+100000)
+}
+
+// ==========================================
+// ยืนยันรหัส OTP จากอีเมล
+// ==========================================
+func (s *userService) VerifyEmail(email string, otp string) error {
+	// 1. หาข้อมูลผู้ใช้จากอีเมล
+	user, err := s.userRepo.GetByEmail(email)
+	if err != nil {
+		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+	}
+
+	// 2. เช็คว่ายืนยันไปแล้วหรือยัง
+	if user.IsVerified {
+		return errors.New("บัญชีนี้ได้รับการยืนยันไปแล้ว")
+	}
+
+	// 3. เช็ครหัส OTP ว่าตรงกันไหม
+	if user.OTPCode != otp {
+		return errors.New("รหัส OTP ไม่ถูกต้อง")
+	}
+
+	// 4. เช็คเวลาหมดอายุ (15 นาที)
+	if user.OTPExpiresAt == nil || time.Now().After(*user.OTPExpiresAt) {
+		return errors.New("รหัส OTP หมดอายุแล้ว กรุณาขอรหัสใหม่")
+	}
+
+	// 5. ถ้าผ่านหมดทุกด่าน ให้สั่งอัปเดต Database ได้เลย!
+	return s.userRepo.UpdateVerificationStatus(user.ID)
+}
+func (s *userService) ResendOTP(email string) error {
+	// 1. หา User
+	user, err := s.userRepo.GetByEmail(email)
+	if err != nil {
+		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+	}
+
+	// 2. สร้าง OTP ใหม่
+	newOTP := generateOTP()
+	newExpiresAt := time.Now().Add(15 * time.Minute)
+
+	// 3. อัปเดตลง DB
+	err = s.userRepo.UpdateOTP(user.ID, newOTP, newExpiresAt)
+	if err != nil {
+		return err
+	}
+
+	// 4. ส่งอีเมลใหม่ (ส่งแบบเบื้องหลังเหมือนเดิม)
+	go func() {
+		_ = s.emailSvc.SendVerificationEmail(user.Email, newOTP)
+	}()
 
 	return nil
 }

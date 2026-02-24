@@ -40,9 +40,9 @@ func NewHandlersContainer(db *sqlx.DB) *HandlersContainer {
 	// 2. Services
 	// ✅ สร้าง sessionRepo แยกออกมาก่อน แล้วโยน db เข้าไป
 	sessionRepo := repository.NewSessionRepository(db)
+	emailService := service.NewEmailService()
+	userService := service.NewUserService(userRepo, sessionRepo, emailService)
 
-	// ✅ แล้วค่อยเอา sessionRepo ไปใส่ใน UserService
-	userService := service.NewUserService(userRepo, sessionRepo)
 	productService := service.NewProductService(productRepo, categoryRepo)
 	categoryService := service.NewCategoryService(categoryRepo)
 

@@ -12,6 +12,11 @@ type UserHandler struct {
 	service domain.UserService
 }
 
+type VerifyEmailInput struct {
+	Email string `json:"email"`
+	OTP   string `json:"otp"`
+}
+
 func NewUserHandler(service domain.UserService) *UserHandler {
 	return &UserHandler{service: service}
 }
@@ -29,6 +34,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		Password string `json:"password"`
 		Address  string `json:"address"`
 		Phone    string `json:"phone"`
+		Email    string `json:"email"`
 	}
 
 	var input RegisterInput
@@ -42,6 +48,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		Password: input.Password, // คราวนี้รหัสผ่าน 1234 มาเต็มๆ แล้ว!
 		Address:  input.Address,
 		Phone:    input.Phone,
+		Email:    input.Email,
 	}
 
 	// ✅ 3. ส่งให้ Service จัดการ
@@ -274,4 +281,36 @@ func (h *UserHandler) Logout(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"message": "ออกจากระบบสำเร็จ",
 	})
+}
+func (h *UserHandler) VerifyEmail(c *fiber.Ctx) error {
+	var input VerifyEmailInput
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	err := h.service.VerifyEmail(input.Email, input.OTP)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "ยินดีด้วย! ยืนยันอีเมลสำเร็จแล้ว ตอนนี้คุณสามารถเข้าสู่ระบบได้เต็มรูปแบบ",
+	})
+}
+
+// ใน user_handler.go
+func (h *UserHandler) ResendOTP(c *fiber.Ctx) error {
+	var input struct {
+		Email string `json:"email"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	err := h.service.ResendOTP(input.Email)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"message": "ส่งรหัส OTP ใหม่ไปที่อีเมลของคุณแล้ว"})
 }
