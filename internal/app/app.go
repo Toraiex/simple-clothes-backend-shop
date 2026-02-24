@@ -19,7 +19,7 @@ func NewApp() *App {
 
 	handlers := NewHandlersContainer(db)
 	app := fiber.New()
-	// 4. Middleware
+
 	app.Use(
 		cors.New(cors.Config{
 			AllowOrigins: "*",
@@ -34,7 +34,6 @@ func NewApp() *App {
 		return c.SendString("Server Running")
 	})
 
-	// 5. Routes
 	setupRoutes(app, handlers)
 
 	return &App{fiber: app}

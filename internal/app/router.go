@@ -12,6 +12,9 @@ func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	// Auth
 	api.Post("/register", h.User.Register)
 	api.Post("/login", h.User.Login)
+	api.Post("/refresh", h.User.RefreshToken)
+	api.Post("/logout", h.User.Logout)
+
 	api.Get("/users", handler.AuthMiddleware, handler.IsAdmin, h.User.GetAllUsers) // 👈 เพิ่มใหม่สำหรับ Admin
 	api.Get("/users/:id", handler.AuthMiddleware, h.User.GetUser)
 	api.Patch("/users/:id", handler.AuthMiddleware, h.User.UpdateUser) // 👈 เปลี่ยนจาก Put เป็น Patch ให้ถูกต้องตามหลั
@@ -38,7 +41,7 @@ func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api.Patch("/cart/items/:id", handler.AuthMiddleware, h.Cart.UpdateQuantity)  // แก้ไขจำนวนชิ้น
 	api.Delete("/cart/items/:id", handler.AuthMiddleware, h.Cart.RemoveFromCart) // ลบของทิ้ง
 
-	api.Post("/orders", handler.AuthMiddleware, h.Order.Create)
+	api.Post("/orders", handler.AuthMiddleware, h.Order.Checkout) // 👈 เปลี่ยนชื่อฟังก์ชันตรงนี้
 	api.Get("/orders/:id", handler.AuthMiddleware, h.Order.GetByID)
 	api.Get("/orders", handler.AuthMiddleware, h.Order.GetMyOrders)
 	api.Put("/orders/:id/cancel", handler.AuthMiddleware, h.Order.Cancel)

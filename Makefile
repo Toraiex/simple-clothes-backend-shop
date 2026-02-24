@@ -1,6 +1,7 @@
 # รัน Web Server
 run:
 	go run cmd/api/main.go
+	go run cmd/seed/main.go
 
 # ⬆️ สร้างตาราง (Up)
 migrate-up:

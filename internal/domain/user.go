@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 type Role string
 
 const (
@@ -16,20 +18,42 @@ type User struct {
 	Phone    string `db:"phone"`
 }
 
+// โครงสร้างข้อมูลให้ตรงกับตาราง sessions
+type Session struct {
+	ID           string    `db:"id"`
+	UserID       uint      `db:"user_id"`
+	RefreshToken string    `db:"refresh_token"`
+	UserAgent    string    `db:"user_agent"`
+	ClientIP     string    `db:"client_ip"`
+	IsBlocked    bool      `db:"is_blocked"`
+	ExpiresAt    time.Time `db:"expires_at"`
+	CreatedAt    time.Time `db:"created_at"`
+}
+
 // 2. Repository Interface
 type UserRepository interface {
 	GetByUsername(username string) (*User, error)
 	Create(user *User) error
 	GetByID(id uint) (*User, error)
 	Update(id uint, user *User) error
-	GetAll() ([]*User, error) // 👈 เพิ่ม: สำหรับดึงข้อมูลทั้งหมด
+	GetAll() ([]*User, error)
 }
 
 // 3. Service Interface
 type UserService interface {
 	Register(user *User) error
-	Login(username, password string) (string, string, error)
+	Login(username, password, userAgent, clientIP string) (string, string, string, error)
 	GetUser(requesterID uint, requesterRole Role, targetID uint) (*User, error)
 	UpdateUser(requesterID uint, requesterRole Role, targetID uint, input *User) error
-	GetAllUsers(requesterRole Role) ([]*User, error) // 👈 เพิ่ม: สำหรับตรวจสอบสิทธิ์ก่อนดึง
+	GetAllUsers(requesterRole Role) ([]*User, error)
+	RefreshAccessToken(refreshToken string) (string, string, error)
+	Logout(refreshToken string) error
+}
+
+type SessionRepository interface {
+	Create(session *Session) error
+	GetByID(id string) (*Session, error)
+	BlockSession(id string) error
+	GetByRefreshToken(token string) (*Session, error)
+	UpdateRefreshToken(sessionID string, newRefreshToken string, newExpiresAt time.Time) error
 }

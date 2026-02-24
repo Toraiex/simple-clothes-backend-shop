@@ -181,7 +181,6 @@ func (r *orderRepository) CancelAndRestoreStock(orderID uint) error {
 
 	_, err = tx.Exec(`UPDATE orders SET status='canceled', updated_at=NOW() WHERE id=$1`, orderID)
 	if err != nil {
-		g
 		tx.Rollback()
 		return err
 	}

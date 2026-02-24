@@ -12,11 +12,16 @@ import (
 )
 
 type userService struct {
-	repo domain.UserRepository
+	userRepo    domain.UserRepository
+	sessionRepo domain.SessionRepository
 }
 
-func NewUserService(repo domain.UserRepository) domain.UserService {
-	return &userService{repo: repo}
+// ✅ 2. อัปเดต Constructor ให้รับ SessionRepository เข้ามาด้วย
+func NewUserService(userRepo domain.UserRepository, sessionRepo domain.SessionRepository) domain.UserService {
+	return &userService{
+		userRepo:    userRepo,
+		sessionRepo: sessionRepo,
+	}
 }
 
 // ==========================================
@@ -25,7 +30,7 @@ func NewUserService(repo domain.UserRepository) domain.UserService {
 func (s *userService) Register(user *domain.User) error {
 
 	// ✅ check username ซ้ำก่อน
-	existing, _ := s.repo.GetByUsername(user.Username)
+	existing, _ := s.userRepo.GetByUsername(user.Username)
 	if existing != nil {
 		return errors.New("username already exists")
 	}
@@ -34,61 +39,65 @@ func (s *userService) Register(user *domain.User) error {
 		user.Role = domain.RoleUser
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 14)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 10)
 	if err != nil {
 		return err
 	}
 
 	user.Password = string(hashedPassword)
 
-	return s.repo.Create(user)
+	return s.userRepo.Create(user)
 }
 
-// ==========================================
-// 2. เข้าสู่ระบบ (Login)
-// ==========================================
-func (s *userService) Login(username, password string) (string, string, error) {
-	// 1. ค้นหา User จาก Username
-	user, err := s.repo.GetByUsername(username)
+func (s *userService) Login(username, password, userAgent, clientIP string) (string, string, string, error) {
+
+	user, err := s.userRepo.GetByUsername(username)
 	if err != nil {
-		return "", "", errors.New("ไม่พบชื่อผู้ใช้งานนี้")
+		return "", "", "", errors.New("ไม่พบชื่อผู้ใช้งานนี้")
 	}
 
-	// 2. เช็คว่ารหัสผ่านตรงกันไหม (เทียบ Hash)
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
-		return "", "", errors.New("รหัสผ่านไม่ถูกต้อง")
-
+		return "", "", "", errors.New("รหัสผ่านไม่ถูกต้อง")
 	}
 
-	// 3. ถ้าผ่านหมด -> สร้าง JWT Token (บัตรผ่าน)
-
-	token := jwt.New(jwt.SigningMethodHS256)
-	claims := token.Claims.(jwt.MapClaims)
-
-	claims["user_id"] = user.ID
-	claims["role"] = user.Role
-	claims["exp"] = time.Now().Add(time.Hour * 72).Unix() // หมดอายุใน 3 วัน
-
-	// เซ็นชื่อกำกับด้วย Secret Key (จาก .env)
-	t, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	// สร้าง Access Token (15 นาที)
+	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"role":    user.Role,
+		"exp":     time.Now().Add(15 * time.Minute).Unix(),
+	})
+	accessToken, err := accessTokenObj.SignedString([]byte(os.Getenv("JWT_ACCESS_SECRET")))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
-	// คืนค่า Token และ Role กลับไป
-	return t, string(user.Role), nil
-}
-func (s *userService) GetUserByID(id uint) (*domain.User, error) {
-	return s.repo.GetByID(id)
-}
-
-func (s *userService) GetUser(requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
-	if requesterRole != "admin" && requesterID != targetID {
-		return nil, errors.New("forbidden")
+	// สร้าง Refresh Token (7 วัน)
+	refreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
+	})
+	refreshToken, err := refreshTokenObj.SignedString([]byte(os.Getenv("JWT_REFRESH_SECRET")))
+	if err != nil {
+		return "", "", "", err
 	}
 
-	return s.repo.GetByID(targetID)
+	// ✅ 4. พระเอกออกโรง: บันทึกข้อมูล Session ลง Database!
+	session := &domain.Session{
+		UserID:       user.ID,
+		RefreshToken: refreshToken,
+		UserAgent:    userAgent,
+		ClientIP:     clientIP,
+		IsBlocked:    false,
+		ExpiresAt:    time.Now().Add(7 * 24 * time.Hour), // หมดอายุพร้อม Token
+	}
+
+	err = s.sessionRepo.Create(session)
+	if err != nil {
+		return "", "", "", errors.New("ไม่สามารถบันทึกเซสชันได้: " + err.Error())
+	}
+
+	return accessToken, refreshToken, string(user.Role), nil
 }
 
 // ... (ฟังก์ชัน Register และ Login เหมือนเดิม) ...
@@ -100,7 +109,7 @@ func (s *userService) GetAllUsers(requesterRole domain.Role) ([]*domain.User, er
 	if requesterRole != domain.RoleAdmin {
 		return nil, errors.New("forbidden: สิทธิ์การเข้าถึงถูกปฏิเสธ เฉพาะผู้ดูแลระบบเท่านั้น")
 	}
-	return s.repo.GetAll()
+	return s.userRepo.GetAll()
 }
 
 // ==========================================
@@ -114,7 +123,7 @@ func (s *userService) UpdateUser(requesterID uint, requesterRole domain.Role, ta
 	}
 
 	// 2. FETCH: ดึงข้อมูลผู้ใช้งานเดิมจาก Database ขึ้นมาก่อน
-	existingUser, err := s.repo.GetByID(targetID)
+	existingUser, err := s.userRepo.GetByID(targetID)
 	if err != nil {
 		return errors.New("ไม่พบข้อมูลผู้ใช้งานนี้ในระบบ")
 	}
@@ -142,5 +151,88 @@ func (s *userService) UpdateUser(requesterID uint, requesterRole domain.Role, ta
 	}
 
 	// 5. SAVE: บันทึกข้อมูลที่ประกอบร่างสมบูรณ์แล้ว กลับลง Database
-	return s.repo.Update(targetID, existingUser)
+	return s.userRepo.Update(targetID, existingUser)
+}
+
+func (s *userService) GetUser(requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
+	if requesterRole != "admin" && requesterID != targetID {
+		return nil, errors.New("forbidden")
+	}
+
+	return s.userRepo.GetByID(targetID)
+}
+
+// ==========================================
+// 5. ต่ออายุ Access Token (Refresh Token)
+// ==========================================
+func (s *userService) RefreshAccessToken(refreshToken string) (string, string, error) {
+	// 1. ค้นหาและตรวจสอบเซสชันเดิม
+	session, err := s.sessionRepo.GetByRefreshToken(refreshToken)
+	if err != nil {
+		return "", "", errors.New("unauthorized: เซสชันไม่ถูกต้อง หรือหมดอายุแล้ว")
+	}
+	if session.IsBlocked {
+		return "", "", errors.New("unauthorized: เซสชันนี้ถูกระงับการใช้งานแล้ว")
+	}
+	if time.Now().After(session.ExpiresAt) {
+		return "", "", errors.New("unauthorized: เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่")
+	}
+
+	user, err := s.userRepo.GetByID(session.UserID)
+	if err != nil {
+		return "", "", errors.New("unauthorized: ไม่พบข้อมูลผู้ใช้งาน")
+	}
+
+	// ✅ 2. สร้าง Access Token ใบใหม่ (15 นาที)
+	// (ใช้ JWT_ACCESS_SECRET ที่เราแยกไว้)
+	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"role":    user.Role,
+		"exp":     time.Now().Add(15 * time.Minute).Unix(),
+	})
+	newAccessToken, err := accessTokenObj.SignedString([]byte(os.Getenv("JWT_ACCESS_SECRET")))
+	if err != nil {
+		return "", "", err
+	}
+
+	// ✅ 3. สร้าง Refresh Token ใบใหม่! (ยืดอายุไปอีก 7 วันนับจากวันนี้)
+	// (ใช้ JWT_REFRESH_SECRET ที่เราแยกไว้)
+	newExpiresAt := time.Now().Add(7 * 24 * time.Hour)
+	refreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"exp":     newExpiresAt.Unix(),
+	})
+	newRefreshToken, err := refreshTokenObj.SignedString([]byte(os.Getenv("JWT_REFRESH_SECRET")))
+	if err != nil {
+		return "", "", err
+	}
+
+	// ✅ 4. สั่ง Database อัปเดต Refresh Token ทับใบเก่าทันที
+	err = s.sessionRepo.UpdateRefreshToken(session.ID, newRefreshToken, newExpiresAt)
+	if err != nil {
+		return "", "", errors.New("ไม่สามารถอัปเดตเซสชันได้")
+	}
+
+	// คืนค่ากลับไปทั้ง 2 ใบ
+	return newAccessToken, newRefreshToken, nil
+}
+
+// ==========================================
+// 6. ออกจากระบบ (Logout)
+// ==========================================
+func (s *userService) Logout(refreshToken string) error {
+	// 1. ค้นหาเซสชันจาก Refresh Token ใน Database
+	session, err := s.sessionRepo.GetByRefreshToken(refreshToken)
+	if err != nil {
+		// ถ้าหาไม่เจอ แสดงว่าอาจจะถูกลบหรือหมดอายุไปแล้ว ถือว่า Logout สำเร็จ
+		return nil
+	}
+
+	// 2. สั่ง Block เซสชันนี้ทิ้ง (is_blocked = true)
+	err = s.sessionRepo.BlockSession(session.ID)
+	if err != nil {
+		return errors.New("เกิดข้อผิดพลาดในการออกจากระบบ")
+	}
+
+	return nil
 }

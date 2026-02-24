@@ -2,7 +2,6 @@ package handler
 
 import (
 	"os"
-	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
@@ -10,52 +9,48 @@ import (
 
 // 1. ยามตรวจบัตร (Check Token & Extract Role)
 func AuthMiddleware(c *fiber.Ctx) error {
-	authHeader := c.Get("Authorization")
+	// ✅ 1. ล้วงหาบัตร (Access Token) จากกระเป๋า (Cookie) แทนการดึงจาก Header
+	tokenString := c.Cookies("access_token")
 
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || parts[0] != "Bearer" {
+	// ถ้าไม่มีคุกกี้ส่งมา แสดงว่ายังไม่ได้ล็อกอิน หรือคุกกี้หมดอายุไปแล้ว (เกิน 15 นาที)
+	if tokenString == "" {
 		return c.Status(401).JSON(fiber.Map{
-			"error": "รูปแบบ Token ไม่ถูกต้อง",
+			"error": "unauthorized: ไม่พบข้อมูลการเข้าสู่ระบบ หรือเซสชันหมดอายุ",
 		})
 	}
 
-	tokenString := parts[1]
-
+	// ✅ 2. ตรวจสอบความถูกต้องของ Token (ส่วนนี้ใช้ลอจิกเดิมของคุณได้เลย)
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return []byte(os.Getenv("JWT_SECRET")), nil
+		return []byte(os.Getenv("JWT_ACCESS_SECRET")), nil
 	})
 
 	if err != nil || !token.Valid {
-		return c.Status(401).JSON(fiber.Map{"error": "invalid token"})
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized: token ไม่ถูกต้อง"})
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "invalid claims"})
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized: invalid claims"})
 	}
-
-	// ... (โค้ดดึง Token ด้านบนเหมือนเดิม) ...
 
 	userIDFloat, ok := claims["user_id"].(float64)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "invalid user id"})
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized: invalid user id"})
 	}
 
-	// 1. แปลงเป็น uint
 	userID := uint(userIDFloat)
-
 	role, ok := claims["role"].(string)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "invalid role"})
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized: invalid role"})
 	}
 
-	// ❌ ลบ SetUserContext(c, userID, role) ออก
-	// ✅ ใช้ c.Locals เพื่อฝากข้อมูลไว้กับ Request นี้โดยตรง
-	c.Locals("user_id", userID) // ตอนนี้ userID เป็นชนิด "uint"
-	c.Locals("role", role)      // role เป็นชนิด "string"
+	// ✅ 3. ฝากข้อมูลไว้กับ Context (เหมือนเดิมเป๊ะ)
+	c.Locals("user_id", userID)
+	c.Locals("role", role)
 
 	return c.Next()
 }
+
 func IsAdmin(c *fiber.Ctx) error {
 	role, err := GetUserRole(c)
 	if err != nil {
