@@ -43,8 +43,10 @@ type UserRepository interface {
 	Update(id uint, user *User) error
 	GetAll() ([]*User, error)
 	GetByEmail(email string) (*User, error)
+
 	UpdateVerificationStatus(userID uint) error
 	UpdateOTP(userID uint, otp string, expiresAt time.Time) error
+	UpdatePassword(userID uint, newPassword string) error
 }
 
 // 3. Service Interface
@@ -54,10 +56,13 @@ type UserService interface {
 	GetUser(requesterID uint, requesterRole Role, targetID uint) (*User, error)
 	UpdateUser(requesterID uint, requesterRole Role, targetID uint, input *User) error
 	GetAllUsers(requesterRole Role) ([]*User, error)
+
 	RefreshAccessToken(refreshToken string) (string, string, error)
 	Logout(refreshToken string) error
 	VerifyEmail(email string, otp string) error
 	ResendOTP(email string) error
+	ForgotPassword(email string) error
+	ResetPassword(email string, otp string, newPassword string) error
 }
 
 type SessionRepository interface {

@@ -49,7 +49,7 @@ func (r *userRepository) GetByUsername(username string) (*domain.User, error) {
 	var user domain.User
 
 	err := r.db.Get(&user, `
-		SELECT id, username, password, role, address, phone, email
+		SELECT id, username, password, role, address, phone, is_verified, email
 		FROM users
 		WHERE username=$1
 	`, username)
@@ -66,7 +66,7 @@ func (r *userRepository) GetByID(id uint) (*domain.User, error) {
 	var user domain.User
 
 	err := r.db.Get(&user, `
-		SELECT id, username, password, role, address, phone, email
+		SELECT id, username, password, role, address, phone, is_verified, email
 		FROM users
 		WHERE id=$1
 	`, id)
@@ -79,18 +79,12 @@ func (r *userRepository) GetByID(id uint) (*domain.User, error) {
 }
 
 func (r *userRepository) Update(id uint, user *domain.User) error {
-
-	_, err := r.db.Exec(`
-		UPDATE users
-		SET address=$1, role=$2, phone=$3
-		WHERE id=$4
-	`,
-		user.Address,
-		string(user.Role),
-		user.Phone,
-		id,
-	)
-
+	query := `
+        UPDATE users 
+        SET address=$1, role=$2, phone=$3, updated_at=NOW() 
+        WHERE id=$4
+    `
+	_, err := r.db.Exec(query, user.Address, string(user.Role), user.Phone, id)
 	return err
 }
 
@@ -99,7 +93,7 @@ func (r *userRepository) GetAll() ([]*domain.User, error) {
 
 	// เลือกดึงมาเฉพาะฟิลด์ที่ปลอดภัย (ไม่ดึง Password)
 	err := r.db.Select(&users, `
-		SELECT id, username, role, address, phone, email
+		SELECT id, username, role, address, phone, is_verified, email
 		FROM users
 		ORDER BY id ASC
 	`)
@@ -116,13 +110,18 @@ func (r *userRepository) GetAll() ([]*domain.User, error) {
 // ==========================================
 func (r *userRepository) GetByEmail(email string) (*domain.User, error) {
 	var user domain.User
-	// 💡 ตรวจสอบตรงนี้: ต้อง SELECT ให้ครบทุกคอลัมน์ตามลำดับที่ Scan ด้านล่างครับ
-	query := `SELECT id, username, password, role, address, phone, email, is_verified, otp_code, otp_expires_at FROM users WHERE email = $1`
+	// ✅ ใช้ COALESCE(column, '') เพื่อป้องกัน Error ตอนเจอค่า NULL ใน string
+	query := `
+        SELECT id, username, password, role, address, phone, email, is_verified, 
+               COALESCE(otp_code, ''), 
+               otp_expires_at 
+        FROM users WHERE email = $1
+    `
 
 	err := r.db.QueryRow(query, email).Scan(
 		&user.ID, &user.Username, &user.Password, &user.Role,
 		&user.Address, &user.Phone, &user.Email, &user.IsVerified,
-		&user.OTPCode, &user.OTPExpiresAt,
+		&user.OTPCode, &user.OTPExpiresAt, // OTPExpiresAt เป็น pointer (*time.Time) อยู่แล้วเลยรับ NULL ได้
 	)
 	return &user, err
 }
@@ -133,7 +132,7 @@ func (r *userRepository) GetByEmail(email string) (*domain.User, error) {
 func (r *userRepository) UpdateVerificationStatus(userID uint) error {
 	query := `
 		UPDATE users 
-		SET is_verified = true, otp_code = NULL, otp_expires_at = NULL 
+		SET is_verified = true, otp_code = NULL, updated_at = NOW(), otp_expires_at = NULL 
 		WHERE id = $1
 	`
 	_, err := r.db.Exec(query, userID)
@@ -142,5 +141,18 @@ func (r *userRepository) UpdateVerificationStatus(userID uint) error {
 func (r *userRepository) UpdateOTP(userID uint, otp string, expiresAt time.Time) error {
 	query := `UPDATE users SET otp_code = $1, otp_expires_at = $2 WHERE id = $3`
 	_, err := r.db.Exec(query, otp, expiresAt, userID)
+	return err
+}
+
+// ==========================================
+// อัปเดตรหัสผ่านใหม่ (พร้อมเคลียร์ OTP ทิ้งเพื่อความปลอดภัย)
+// ==========================================
+func (r *userRepository) UpdatePassword(userID uint, newPassword string) error {
+	query := `
+		UPDATE users 
+		SET password = $1, otp_code = NULL, updated_at = NOW(), otp_expires_at = NULL 
+		WHERE id = $2
+	`
+	_, err := r.db.Exec(query, newPassword, userID)
 	return err
 }

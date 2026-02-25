@@ -61,18 +61,24 @@ func (s *userService) Register(user *domain.User) error {
 		return err
 	}
 
-	// ✅ 5. ภารกิจส่งอีเมล! (ถ้ามี Email กรอกมา)
+	// 5. ภารกิจส่งอีเมล! (ถ้ามี Email กรอกมา)
 	if user.Email != "" {
-		// 💡 แอบใช้ Goroutine (go) เพื่อให้มันส่งอีเมลอยู่เบื้องหลัง
-		// ลูกค้าจะได้ไม่ต้องรอโหลดหน้าเว็บนานๆ ตอนกดสมัครครับ (นี่คือท่ามาตรฐานเลย!)
-		go func() {
-			err := s.emailSvc.SendVerificationEmail(user.Email, otp)
+		// ✅ อัปเกรด Goroutine ให้ปลอดภัย (Safe Goroutine)
+		go func(targetEmail string, targetOTP string) {
+			// ดักจับ Panic ป้องกันเซิร์ฟเวอร์พัง
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Println("⚠️ [Recovered] เกิดข้อผิดพลาดร้ายแรงในระบบส่งอีเมล:", r)
+				}
+			}()
+
+			err := s.emailSvc.SendVerificationEmail(targetEmail, targetOTP)
 			if err != nil {
 				fmt.Println("❌ ส่งอีเมลไม่สำเร็จ:", err)
 			} else {
-				fmt.Println("✅ ส่ง OTP ไปที่", user.Email, "สำเร็จแล้ว!")
+				fmt.Println("✅ ส่ง OTP ไปที่", targetEmail, "สำเร็จแล้ว!")
 			}
-		}()
+		}(user.Email, otp) // 👈 ส่งค่าตัวแปรเข้าไปตรงนี้ ป้องกันการดึงค่าผิดพลาด (Closure problem)
 	}
 
 	return nil
@@ -129,11 +135,6 @@ func (s *userService) Login(username, password, userAgent, clientIP string) (str
 	return accessToken, refreshToken, string(user.Role), nil
 }
 
-// ... (ฟังก์ชัน Register และ Login เหมือนเดิม) ...
-
-// ==========================================
-// 3. ดึงรายชื่อทั้งหมด (เฉพาะ Admin)
-// ==========================================
 func (s *userService) GetAllUsers(requesterRole domain.Role) ([]*domain.User, error) {
 	if requesterRole != domain.RoleAdmin {
 		return nil, errors.New("forbidden: สิทธิ์การเข้าถึงถูกปฏิเสธ เฉพาะผู้ดูแลระบบเท่านั้น")
@@ -141,46 +142,30 @@ func (s *userService) GetAllUsers(requesterRole domain.Role) ([]*domain.User, er
 	return s.userRepo.GetAll()
 }
 
-// ==========================================
-// 4. อัปเดตข้อมูลผู้ใช้งาน (ทำ Partial Update)
-// ==========================================
 func (s *userService) UpdateUser(requesterID uint, requesterRole domain.Role, targetID uint, input *domain.User) error {
-
-	// 1. ตรวจสอบสิทธิ์: ต้องเป็น Admin หรือ เป็นเจ้าของบัญชีตัวเองเท่านั้น
-	if requesterRole != domain.RoleAdmin && requesterID != targetID {
-		return errors.New("forbidden: คุณไม่มีสิทธิ์แก้ไขข้อมูลของผู้อื่น")
-	}
-
-	// 2. FETCH: ดึงข้อมูลผู้ใช้งานเดิมจาก Database ขึ้นมาก่อน
-	existingUser, err := s.userRepo.GetByID(targetID)
+	current, err := s.userRepo.GetByID(targetID)
 	if err != nil {
 		return errors.New("ไม่พบข้อมูลผู้ใช้งานนี้ในระบบ")
 	}
 
-	// 3. PATCH: อัปเดตข้อมูล "เฉพาะฟิลด์ที่มีการส่งค่ามาใหม่" (ถ้าไม่ส่งมา ให้ใช้ค่าเดิม)
+	if requesterRole != domain.RoleAdmin && requesterID != targetID {
+		return errors.New("forbidden: คุณไม่มีสิทธิ์แก้ไขข้อมูลของผู้อื่น")
+	}
+
 	if input.Address != "" {
-		existingUser.Address = input.Address
+		current.Address = input.Address
 	}
 	if input.Phone != "" {
-		existingUser.Phone = input.Phone
+		current.Phone = input.Phone
 	}
 
-	// 4. ROLE LOGIC: จัดการเรื่องสิทธิ์ (Role) อย่างเข้มงวด
-	if input.Role != "" {
-		// ถ้าคนแก้ไม่ใช่ Admin ห้ามเปลี่ยน Role เด็ดขาด!
-		if requesterRole != domain.RoleAdmin {
-			return errors.New("forbidden: คุณไม่สามารถเปลี่ยนระดับสิทธิ์ (Role) ของตัวเองได้")
+	if input.Role != "" && requesterRole == domain.RoleAdmin {
+		if input.Role == domain.RoleAdmin || input.Role == domain.RoleUser {
+			current.Role = input.Role
 		}
-
-		// ป้องกันการพิมพ์ Role มั่วๆ เข้ามา (เช่น role="hacker")
-		if input.Role != domain.RoleAdmin && input.Role != domain.RoleUser {
-			return errors.New("invalid role: สิทธิ์ต้องเป็น 'admin' หรือ 'user' เท่านั้น")
-		}
-		existingUser.Role = input.Role
 	}
 
-	// 5. SAVE: บันทึกข้อมูลที่ประกอบร่างสมบูรณ์แล้ว กลับลง Database
-	return s.userRepo.Update(targetID, existingUser)
+	return s.userRepo.Update(targetID, current)
 }
 
 func (s *userService) GetUser(requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
@@ -319,6 +304,61 @@ func (s *userService) ResendOTP(email string) error {
 	go func() {
 		_ = s.emailSvc.SendVerificationEmail(user.Email, newOTP)
 	}()
+
+	return nil
+}
+
+// 1. ฟังก์ชันขอรีเซ็ตรหัสผ่าน
+func (s *userService) ForgotPassword(email string) error {
+	user, err := s.userRepo.GetByEmail(email)
+	if err != nil {
+		// ✅ พิมพ์ Error จริงออกมาดูใน Terminal ของเราด้วย
+		fmt.Println("❌ GetByEmail Error:", err)
+		return errors.New("ไม่พบอีเมลนี้ในระบบ หรือเกิดข้อผิดพลาดภายใน")
+	}
+
+	otp := generateOTP() // ใช้ฟังก์ชันสุ่ม OTP เดิมที่มีอยู่แล้ว
+	expiresAt := time.Now().Add(15 * time.Minute)
+
+	err = s.userRepo.UpdateOTP(user.ID, otp, expiresAt) // ใช้ฟังก์ชันอัปเดต OTP เดิมที่มี
+	if err != nil {
+		return err
+	}
+
+	// ส่งอีเมลเบื้องหลัง
+	go func(targetEmail, targetOTP string) {
+		defer func() {
+			if r := recover(); r != nil {
+			}
+		}()
+		_ = s.emailSvc.SendPasswordResetEmail(targetEmail, targetOTP)
+	}(user.Email, otp)
+
+	return nil
+}
+
+// 2. ฟังก์ชันตั้งรหัสผ่านใหม่
+func (s *userService) ResetPassword(email, otp, newPassword string) error {
+	user, err := s.userRepo.GetByEmail(email)
+	if err != nil {
+		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+	}
+
+	if user.OTPCode != otp || time.Now().After(*user.OTPExpiresAt) {
+		return errors.New("รหัส OTP ไม่ถูกต้องหรือหมดอายุแล้ว")
+	}
+
+	// เข้ารหัสผ่านใหม่
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), 10)
+	if err != nil {
+		return err
+	}
+
+	// อัปเดตรหัสผ่านลง DB (ต้องไปเพิ่มท่า UpdatePassword ใน Repository นิดนึง)
+	err = s.userRepo.UpdatePassword(user.ID, string(hashedPassword))
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

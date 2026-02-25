@@ -10,6 +10,7 @@ import (
 // สร้างแบบแปลนสำหรับบุรุษไปรษณีย์
 type EmailService interface {
 	SendVerificationEmail(toEmail string, otpCode string) error
+	SendPasswordResetEmail(toEmail string, otpCode string) error
 }
 
 type emailService struct{}
@@ -40,6 +41,33 @@ func (s *emailService) SendVerificationEmail(toEmail string, otpCode string) err
 	m.SetBody("text/html", htmlBody)
 
 	// 3. ตั้งค่าการเชื่อมต่อ (ดึงข้อมูลจาก .env)
+	port, _ := strconv.Atoi(os.Getenv("SMTP_PORT")) // แปลง Port จาก String เป็นตัวเลข
+	d := gomail.NewDialer(
+		os.Getenv("SMTP_HOST"),
+		port,
+		os.Getenv("SMTP_EMAIL"),
+		os.Getenv("SMTP_PASSWORD"),
+	)
+
+	// 4. สั่งส่งออกไปเลย!
+	return d.DialAndSend(m)
+}
+
+// ใน email_service.go เพิ่มใน Interface และ Struct
+func (s *emailService) SendPasswordResetEmail(toEmail string, otpCode string) error {
+	m := gomail.NewMessage()
+	m.SetHeader("From", os.Getenv("SMTP_EMAIL"))
+	m.SetHeader("To", toEmail)
+	m.SetHeader("Subject", "รีเซ็ตรหัสผ่านของคุณ - Simple Clothes Shop 🔒")
+
+	htmlBody := `
+		<h2>มีการร้องขอรีเซ็ตรหัสผ่านบัญชีของคุณ</h2>
+		<p>นำรหัส OTP นี้ไปกรอกเพื่อตั้งรหัสผ่านใหม่:</p>
+		<h1 style="color: #2196F3; background-color: #f4f4f4; padding: 10px; text-align: center;">` + otpCode + `</h1>
+		<p style="color: red;">*รหัสนี้มีอายุ 15 นาที หากคุณไม่ได้ทำรายการนี้ โปรดเพิกเฉยต่ออีเมลฉบับนี้</p>
+	`
+	m.SetBody("text/html", htmlBody)
+
 	port, _ := strconv.Atoi(os.Getenv("SMTP_PORT")) // แปลง Port จาก String เป็นตัวเลข
 	d := gomail.NewDialer(
 		os.Getenv("SMTP_HOST"),

@@ -30,6 +30,9 @@ func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api.Post("/verify-email", h.User.VerifyEmail)
 	api.Post("/resend-otp", authLimiter, h.User.ResendOTP)
 
+	api.Post("/forgot-password", h.User.ForgotPassword)
+	api.Post("/reset-password", h.User.ResetPassword)
+
 	api.Get("/users", handler.AuthMiddleware, handler.IsAdmin, h.User.GetAllUsers) // 👈 เพิ่มใหม่สำหรับ Admin
 	api.Get("/users/:id", handler.AuthMiddleware, h.User.GetUser)
 	api.Patch("/users/:id", handler.AuthMiddleware, h.User.UpdateUser) // 👈 เปลี่ยนจาก Put เป็น Patch ให้ถูกต้องตามหลั

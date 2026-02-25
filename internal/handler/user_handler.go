@@ -33,8 +33,8 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		Username string `json:"username" validate:"required,min=6"` // บังคับกรอก, ขั้นต่ำ 6 ตัว
 		Password string `json:"password" validate:"required,min=6"` // บังคับกรอก, ขั้นต่ำ 6 ตัว
 		Address  string `json:"address"`                            // ไม่บังคับ
-		Phone    string `json:"phone" validate:"required,len=10"`   // บังคับกรอก, ต้องยาว 10 ตัวเป๊ะ
-		Email    string `json:"email" validate:"required,email"`    // บังคับกรอก, ต้องเป็นฟอร์แมตอีเมล
+		Phone    string `json:"phone" `
+		Email    string `json:"email" validate:"required,email"` // บังคับกรอก, ต้องเป็นฟอร์แมตอีเมล
 	}
 
 	var input RegisterInput
@@ -206,59 +206,43 @@ func (h *UserHandler) GetAllUsers(c *fiber.Ctx) error {
 	})
 }
 
-// ==========================================
-// อัปเดตข้อมูลผู้ใช้ (UpdateUser)
-// ==========================================
 func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
-	idParam, err := strconv.Atoi(c.Params("id"))
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID ผู้ใช้งานไม่ถูกต้อง"})
+	idParam, _ := strconv.Atoi(c.Params("id"))
+	requesterRole := domain.Role(c.Locals("role").(string))
+	requesterID := c.Locals("user_id").(uint)
+
+	type UpdateInput struct {
+		Address *string `json:"address"`
+		Phone   *string `json:"phone" validate:"omitempty,len=10,numeric"`
+		Role    *string `json:"role"`
 	}
 
-	requesterID, ok := c.Locals("user_id").(uint)
-	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
-	}
-
-	roleStr, ok := c.Locals("role").(string)
-	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
-	}
-	requesterRole := domain.Role(roleStr)
-
-	// สร้าง DTO เพื่อบังคับให้ Client ส่งมาได้แค่ 3 ฟิลด์นี้เท่านั้น (ป้องกันคนเนียนส่ง Password มาแก้)
-	type UpdateUserInput struct {
-		Address string `json:"address"`
-		Phone   string `json:"phone"`
-		Role    string `json:"role"`
-	}
-
-	var input UpdateUserInput
+	var input UpdateInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูล JSON ไม่ถูกต้อง"})
+		return c.Status(400).JSON(fiber.Map{"error": "JSON ไม่ถูกต้อง"})
+	}
+	if err := validate.Struct(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// นำเข้า Service
-	err = h.service.UpdateUser(
-		requesterID,
-		requesterRole,
-		uint(idParam),
-		&domain.User{
-			Address: input.Address,
-			Phone:   input.Phone,
-			Role:    domain.Role(input.Role), // แปลงเป็น type Role ก่อนส่ง
-		},
-	)
+	// ดึงค่าจาก pointer มาใส่ domain model
+	updateData := &domain.User{}
+	if input.Address != nil {
+		updateData.Address = *input.Address
+	}
+	if input.Phone != nil {
+		updateData.Phone = *input.Phone
+	}
+	if input.Role != nil {
+		updateData.Role = domain.Role(*input.Role)
+	}
 
+	err := h.service.UpdateUser(requesterID, requesterRole, uint(idParam), updateData)
 	if err != nil {
-		// จับ Error ถ้าเป็น 404 ไม่พบผู้ใช้ หรือ 403 Forbidden
-		if err.Error() == "ไม่พบข้อมูลผู้ใช้งานนี้ในระบบ" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
-		}
 		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{"message": "อัปเดตข้อมูลผู้ใช้งานสำเร็จ"})
+	return c.JSON(fiber.Map{"message": "อัปเดตข้อมูลสำเร็จ"})
 }
 
 // ==========================================
@@ -322,4 +306,55 @@ func (h *UserHandler) ResendOTP(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"message": "ส่งรหัส OTP ใหม่ไปที่อีเมลของคุณแล้ว"})
+}
+
+// ==========================================
+// 7. ขอรีเซ็ตรหัสผ่าน (Forgot Password)
+// ==========================================
+func (h *UserHandler) ForgotPassword(c *fiber.Ctx) error {
+	var input struct {
+		Email string `json:"email" validate:"required,email"` // ถ้าใช้ validator ก็ใส่ tag ไว้ได้เลยครับ
+	}
+
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
+	}
+
+	err := h.service.ForgotPassword(input.Email)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "ส่งรหัส OTP สำหรับตั้งรหัสผ่านใหม่ ไปที่อีเมลของคุณแล้ว",
+	})
+}
+
+// ==========================================
+// 8. ตั้งรหัสผ่านใหม่ (Reset Password)
+// ==========================================
+func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
+	var input struct {
+		Email       string `json:"email" validate:"required,email"`
+		OTP         string `json:"otp" validate:"required,len=6"`
+		NewPassword string `json:"new_password" validate:"required,min=6,max=20"`
+	}
+
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
+	}
+
+	// ตรวจสอบความยาวรหัสผ่านเบื้องต้น
+	if len(input.NewPassword) < 6 {
+		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร"})
+	}
+
+	err := h.service.ResetPassword(input.Email, input.OTP, input.NewPassword)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "รีเซ็ตรหัสผ่านสำเร็จ! คุณสามารถเข้าสู่ระบบด้วยรหัสผ่านใหม่ได้ทันที",
+	})
 }
