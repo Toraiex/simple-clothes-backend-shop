@@ -20,7 +20,6 @@ type HandlersContainer struct {
 	Cart     *handler.CartHandler
 }
 
-// NewHandlersContainer ทำหน้าที่ Wiring ทุกอย่าง แล้วส่งคืนแค่ก้อน Handlers
 func NewHandlersContainer(db *sqlx.DB) *HandlersContainer {
 	// 1. Repositories
 	userRepo := repository.NewUserRepository(db)

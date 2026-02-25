@@ -15,12 +15,6 @@ func NewCartHandler(cartService domain.CartService) *CartHandler {
 	return &CartHandler{cartService: cartService}
 }
 
-// -----------------------------------------------------------------
-// 📌 ตัวช่วย (Helper): ดึง UserID จาก Token ที่ Middleware ส่งมาให้
-// -----------------------------------------------------------------
-// -----------------------------------------------------------------
-// 📌 ตัวช่วย (Helper): ดึง UserID จาก Token ที่ Middleware ส่งมาให้
-// -----------------------------------------------------------------
 func getUserID(c *fiber.Ctx) (uint, error) {
 	// ดึงค่าจาก key "user_id" ที่ AuthMiddleware ส่งมาให้
 	userID, ok := c.Locals("user_id").(uint)
