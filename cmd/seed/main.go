@@ -39,68 +39,56 @@ func main() {
 		log.Println("No .env file found")
 	}
 
-	// ตั้งค่า Seed สำหรับการสุ่ม
 	rand.Seed(time.Now().UnixNano())
 
 	database.Connect()
 	db := database.DB
 
-	productRepo := repository.NewProductRepository(db) // 👈 ต้องมีบรรทัดนี้
+	productRepo := repository.NewProductRepository(db)
 	categoryRepo := repository.NewCategoryRepository(db)
 	categoryService := service.NewCategoryService(categoryRepo, productRepo)
 
-	log.Println("🌱 กำลังเริ่มกระบวนการ Seed ข้อมูลจาก Platzi...")
+	log.Println("🌱 กำลังเริ่มกระบวนการ Seed ข้อมูล...")
 
-	// 1. สร้าง Categories ก่อน
-	seedCategories(categoryService)
+	// 🧹 1. ล้างข้อมูลเก่าทิ้งทั้งหมด (Reset Database)
+	log.Println("...กำลังทำความสะอาดตาราง (Truncate)")
+	_, _ = db.Exec("TRUNCATE TABLE categories, products, product_variants, cart_items, carts, order_items, orders RESTART IDENTITY CASCADE")
 
-	// 2. สร้าง Products และ Variants ต่อเลย
+	// 📦 2. สร้าง Categories หลักแบบ Manual (ป้องกันข้อมูลขยะจาก API)
+	seedCleanCategories(categoryService)
+
+	// 👕 3. ดึงสินค้าจาก API แล้วจับคู่หมวดหมู่ให้ถูกต้อง
 	seedProductsAndVariants(db)
 
 	log.Println("✅ กระบวนการ Seed ข้อมูลเสร็จสมบูรณ์!")
 }
 
-func seedCategories(svc domain.CategoryService) {
-	log.Println("...กำลังดึงข้อมูล Categories จาก API ภายนอก")
-	resp, err := http.Get("https://api.escuelajs.co/api/v1/categories")
-	if err != nil {
-		log.Fatalf("ดึงข้อมูลไม่สำเร็จ: %v", err)
-	}
-	defer resp.Body.Close()
+func seedCleanCategories(svc domain.CategoryService) {
+	log.Println("...กำลังสร้างหมวดหมู่หลัก (Core Categories)")
 
-	body, _ := io.ReadAll(resp.Body)
-	var platziCategories []PlatziCategory
-	_ = json.Unmarshal(body, &platziCategories)
-
-	// ✅ 1. กำหนดหมวดหมู่ที่เรา "อนุญาต" ให้เข้าเครื่องเรา (White-list)
-	allowedCategories := map[string]bool{
-		"Clothes":     true,
-		"Electronics": true,
-		"Furniture":   true,
-		"Shoes":       true,
-		"Others":      true,
+	coreCategories := []string{
+		"Clothes",
+		"Electronics",
+		"Furniture",
+		"Shoes",
+		"Miscellaneous",
 	}
 
-	for _, cat := range platziCategories {
-		// ✅ 2. เช็คว่าชื่อหมวดหมู่ที่ดึงมา อยู่ในลิสต์ที่เราต้องการไหม
-		// ถ้าเป็นพวกชื่อไฟล์ .xlsx หรือชื่อมั่วๆ มันจะไม่ผ่านเงื่อนไขนี้ครับ
-		if allowedCategories[cat.Name] {
-			err := svc.CreateCategory(cat.Name)
-			if err != nil && !strings.Contains(err.Error(), "มีอยู่ในระบบแล้ว") {
-				log.Printf("❌ สร้างหมวดหมู่ '%s' ไม่สำเร็จ: %v\n", cat.Name, err)
-			} else {
-				log.Printf("   ✅ เพิ่มหมวดหมู่: %s\n", cat.Name)
-			}
+	for _, name := range coreCategories {
+		err := svc.CreateCategory(name)
+		if err != nil {
+			log.Printf("❌ สร้างหมวดหมู่ '%s' ไม่สำเร็จ: %v\n", name, err)
+		} else {
+			fmt.Printf("   ✅ สร้างหมวดหมู่: %s\n", name)
 		}
 	}
-	log.Println("✔️ จัดการข้อมูลหมวดหมู่ที่ถูกต้องเสร็จสิ้น")
 }
 
 func seedProductsAndVariants(db *sqlx.DB) {
-	log.Println("...กำลังดึงข้อมูล Products")
+	log.Println("...กำลังดึงข้อมูล Products จาก Platzi API")
 
-	// ดึงสินค้ามา 30 ชิ้น
-	resp, err := http.Get("https://api.escuelajs.co/api/v1/products?limit=30&offset=0")
+	// ดึงสินค้ามา 40 ชิ้น
+	resp, err := http.Get("https://api.escuelajs.co/api/v1/products?limit=40&offset=0")
 	if err != nil {
 		log.Fatalf("ดึงข้อมูล Products ไม่สำเร็จ: %v", err)
 	}
@@ -116,22 +104,37 @@ func seedProductsAndVariants(db *sqlx.DB) {
 		log.Fatalf("แปลง JSON ไม่สำเร็จ: %v", err)
 	}
 
-	colors := []string{"Red", "Blue", "Black", "White", "Green", "Navy", "Grey"}
-	sizes := []string{"S", "M", "L", "XL", "XXL"}
+	colors := []string{"Red", "Blue", "Black", "White", "Green", "Grey"}
+	sizes := []string{"S", "M", "L", "XL"}
 
 	successCount := 0
 	for _, p := range platziProducts {
+
+		// 🧠 ระบบจับคู่หมวดหมู่อัจฉริยะ (Smart Category Mapping)
+		// ไม่สนใจว่าจะสะกด Electronic หรือ Electronics เราจะจับยัดให้ถูกหมวด
+		mappedCategory := "Miscellaneous" // ค่าเริ่มต้น
+		lowerCatName := strings.ToLower(p.Category.Name)
+
+		if strings.Contains(lowerCatName, "elect") {
+			mappedCategory = "Electronics"
+		} else if strings.Contains(lowerCatName, "cloth") || strings.Contains(lowerCatName, "shirt") {
+			mappedCategory = "Clothes"
+		} else if strings.Contains(lowerCatName, "shoe") {
+			mappedCategory = "Shoes"
+		} else if strings.Contains(lowerCatName, "furni") {
+			mappedCategory = "Furniture"
+		}
+
+		// ดึง ID หมวดหมู่จากฐานข้อมูล
 		var localCategoryID uint
-		err := db.Get(&localCategoryID, "SELECT id FROM categories WHERE name=$1 LIMIT 1", p.Category.Name)
+		err := db.Get(&localCategoryID, "SELECT id FROM categories WHERE name=$1", mappedCategory)
 		if err != nil {
-			log.Printf("⚠️ ข้ามสินค้า '%s' (ไม่พบหมวดหมู่ %s)\n", p.Title, p.Category.Name)
+			log.Printf("⚠️ ข้ามสินค้า '%s' (เกิดข้อผิดพลาดในการดึง ID หมวดหมู่)\n", p.Title)
 			continue
 		}
 
 		var newProductID uint
 		randomStock := rand.Intn(100) + 10
-
-		// 💡 แปลง []string ให้กลายเป็น JSON เพื่อบันทึกลงคอลัมน์ images (JSONB)
 		imagesJSON, _ := json.Marshal(p.Images)
 
 		err = db.QueryRow(`
@@ -145,18 +148,15 @@ func seedProductsAndVariants(db *sqlx.DB) {
 			continue
 		}
 
-		numVariants := rand.Intn(3) + 3
+		numVariants := rand.Intn(3) + 2
 		for i := 0; i < numVariants; i++ {
 			color := colors[rand.Intn(len(colors))]
 			size := sizes[rand.Intn(len(sizes))]
 			variantStock := rand.Intn(20) + 1
 			variantPrice := p.Price
 
-			// 💡 1. สร้างรหัส SKU ให้ไม่ซ้ำกัน (เช่น PRD-1-RED-M-0)
-			colorCode := strings.ToUpper(color)
-			sku := fmt.Sprintf("PRD-%d-%s-%s-%d", newProductID, colorCode, size, i)
+			sku := fmt.Sprintf("PRD-%d-%s-%s-%d", newProductID, strings.ToUpper(color), size, i)
 
-			// 💡 2. จัดรูปแบบ Attributes ลง Map แล้วแปลงเป็น JSONB
 			attributesMap := map[string]string{
 				"Color": color,
 				"Size":  size,
@@ -174,7 +174,7 @@ func seedProductsAndVariants(db *sqlx.DB) {
 		}
 
 		successCount++
-		log.Printf("✔️ สร้างสินค้าสำเร็จ: %s (พร้อม Variants)\n", p.Title)
+		fmt.Printf("✔️ ได้สินค้า: %s -> อยู่ในหมวด: %s\n", p.Title, mappedCategory)
 	}
 
 	log.Printf("🎉 สร้างสินค้าพร้อมขายทั้งหมด %d รายการ!\n", successCount)

@@ -32,7 +32,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 
 	type RegisterInput struct {
 		Username string `json:"username" validate:"required,min=6,max=20"`
-		Password string `json:"password" validate:"required,min=6.max=20"`
+		Password string `json:"password" validate:"required,min=6,max=20"`
 		Address  string `json:"address"`
 		Phone    string `json:"phone" validate:"len=10,numeric"`
 		Email    string `json:"email" validate:"required,email"`
