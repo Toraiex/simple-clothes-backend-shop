@@ -2,21 +2,33 @@ package app
 
 import (
 	"simple-clothes-shop/internal/handler"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 )
 
 func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api := app.Group("/api")
 
+	authLimiter := limiter.New(limiter.Config{
+		Max:        3,
+		Expiration: 5 * time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{
+				"error": "คุณทำรายการบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่",
+			})
+		},
+	})
+
 	// Auth
 	api.Post("/register", h.User.Register)
-	api.Post("/login", h.User.Login)
+	api.Post("/login", authLimiter, h.User.Login)
 	api.Post("/refresh", h.User.RefreshToken)
 	api.Post("/logout", h.User.Logout)
 
 	api.Post("/verify-email", h.User.VerifyEmail)
-	api.Post("/resend-otp", h.User.ResendOTP)
+	api.Post("/resend-otp", authLimiter, h.User.ResendOTP)
 
 	api.Get("/users", handler.AuthMiddleware, handler.IsAdmin, h.User.GetAllUsers) // 👈 เพิ่มใหม่สำหรับ Admin
 	api.Get("/users/:id", handler.AuthMiddleware, h.User.GetUser)

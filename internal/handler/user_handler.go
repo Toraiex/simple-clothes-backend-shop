@@ -5,8 +5,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 )
+
+var validate = validator.New()
 
 type UserHandler struct {
 	service domain.UserService
@@ -24,39 +27,45 @@ func NewUserHandler(service domain.UserService) *UserHandler {
 // ==========================================
 // 1. ลงทะเบียน (Register)
 // ==========================================
-// ==========================================
-// 1. ลงทะเบียน (Register)
-// ==========================================
 func (h *UserHandler) Register(c *fiber.Ctx) error {
-	// ✅ 1. สร้าง Struct รับข้อมูลเฉพาะกิจ (ไม่ต้องมี json:"-")
+
 	type RegisterInput struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Address  string `json:"address"`
-		Phone    string `json:"phone"`
-		Email    string `json:"email"`
+		Username string `json:"username" validate:"required,min=6"` // บังคับกรอก, ขั้นต่ำ 6 ตัว
+		Password string `json:"password" validate:"required,min=6"` // บังคับกรอก, ขั้นต่ำ 6 ตัว
+		Address  string `json:"address"`                            // ไม่บังคับ
+		Phone    string `json:"phone" validate:"required,len=10"`   // บังคับกรอก, ต้องยาว 10 ตัวเป๊ะ
+		Email    string `json:"email" validate:"required,email"`    // บังคับกรอก, ต้องเป็นฟอร์แมตอีเมล
 	}
 
 	var input RegisterInput
+
+	// ดึงข้อมูลจาก Body มาใส่ Struct
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
 	}
 
-	// ✅ 2. ประกอบร่างเป็น Domain Model (ย้ายค่าจาก Input มาใส่ User)
+	// ✅ 4. สั่งตรวจสอบข้อมูลตามกฎที่เราเขียนไว้ใน Tag
+	if err := validate.Struct(&input); err != nil {
+		// ถ้าข้อมูลไม่ตรงเงื่อนไข ให้เตะกลับไปพร้อมบอกว่าฟิลด์ไหนผิด
+		return c.Status(400).JSON(fiber.Map{
+			"error":   "ข้อมูลไม่ผ่านเกณฑ์การตรวจสอบ (เช่น อีเมลผิดรูปแบบ หรือ รหัสผ่านสั้นเกินไป)",
+			"details": err.Error(),
+		})
+	}
+
+	// ✅ 5. ถ้าข้อมูลเป๊ะหมด ค่อยประกอบร่างส่งให้ Service (โค้ดส่วนนี้ของคุณเขียนดีแล้วครับ)
 	user := domain.User{
 		Username: input.Username,
-		Password: input.Password, // คราวนี้รหัสผ่าน 1234 มาเต็มๆ แล้ว!
+		Password: input.Password,
 		Address:  input.Address,
 		Phone:    input.Phone,
 		Email:    input.Email,
 	}
 
-	// ✅ 3. ส่งให้ Service จัดการ
 	if err := h.service.Register(&user); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 💡 ไม่ต้องสั่ง user.Password = "" แล้ว เพราะ json:"-" ใน Domain จะบล็อกให้เองตอน Return
 	return c.Status(201).JSON(fiber.Map{
 		"message": "สมัครสมาชิกสำเร็จ",
 		"user":    user,
