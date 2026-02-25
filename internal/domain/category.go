@@ -3,13 +3,14 @@ package domain
 import "time"
 
 type Category struct {
-	ID        uint      `db:"id"`
-	Name      string    `db:"name"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID        uint      `db:"id"         json:"id"`         // 👈 เพิ่ม json:"id"
+	Name      string    `db:"name"       json:"name"`       // 👈 เพิ่ม json:"name"
+	CreatedAt time.Time `db:"created_at" json:"created_at"` // 👈 เพิ่ม json:"created_at"
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"` // 👈 เพิ่ม json:"updated_at"
+
+	Products []Product `db:"-" json:"products,omitempty"`
 }
 
-// Repository Contract
 type CategoryRepository interface {
 	GetAll() ([]Category, error)
 	GetByID(id uint) (*Category, error)

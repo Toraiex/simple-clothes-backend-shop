@@ -5,10 +5,9 @@ import (
 	"simple-clothes-shop/internal/domain" // เรียกใช้กฎจาก Domain
 )
 
-// สร้าง Struct สำหรับ Service
 type productService struct {
 	repo         domain.ProductRepository
-	categoryRepo domain.CategoryRepository // 👈 เพิ่มฟิลด์นี้
+	categoryRepo domain.CategoryRepository // ต้องมีบรรทัดนี้
 }
 
 // 👈 แก้ไขให้รับ 2 parameters
@@ -20,15 +19,12 @@ func NewProductService(repo domain.ProductRepository, catRepo domain.CategoryRep
 }
 
 func (s *productService) UpdateProduct(id uint, product *domain.Product) error {
-	// 1. FETCH: ดึงข้อมูลสินค้า "ตัวเก่า" จาก Database ออกมาก่อน
+
 	existingProduct, err := s.repo.GetByID(id)
 	if err != nil {
 		return errors.New("ไม่พบสินค้าที่ต้องการแก้ไข")
 	}
 
-	// 2. MERGE: เอาข้อมูลใหม่ไป "แปะทับ" ข้อมูลเก่า (เฉพาะอันที่ส่งมา)
-
-	// ถ้ามีการส่งชื่อมาใหม่ (ไม่ใช่ค่าว่าง) ให้ใช้ชื่อใหม่
 	if product.Name != "" {
 		existingProduct.Name = product.Name
 	}
@@ -69,22 +65,6 @@ func (s *productService) UpdateProduct(id uint, product *domain.Product) error {
 	return s.repo.Update(id, existingProduct)
 }
 
-// ==========================================
-// เริ่มเขียน Logic (Implement Service Interface)
-// ==========================================
-
-// 1. ดึงสินค้าทั้งหมด
-func (s *productService) FetchAll() ([]domain.Product, error) {
-	// ตรงนี้เราสั่งให้ Repo ไปหยิบของมาได้เลย
-	return s.repo.GetAll()
-}
-
-// 2. ดึงสินค้าตาม ID
-func (s *productService) FetchByID(id uint) (*domain.Product, error) {
-	return s.repo.GetByID(id)
-}
-
-// 3. สร้างสินค้าใหม่ (ที่มีการเช็คกฎธุรกิจ)
 func (s *productService) CreateProduct(product *domain.Product) error {
 	// 🛡️ ตัวอย่าง Business Logic 1: ห้ามตั้งราคาติดลบ
 	if product.Price <= 0 {
@@ -112,21 +92,70 @@ func (s *productService) RemoveProduct(id uint) error {
 	// อาจจะเพิ่ม Logic เช็คว่าสินค้านี้มียอดค้างส่งไหมก่อนลบก็ได้
 	return s.repo.Delete(id)
 }
+
+// 1. ดึงสินค้าทั้งหมด (เพิ่มตัวนี้กลับเข้าไปครับ)
+func (s *productService) FetchAll() ([]domain.Product, error) {
+	products, err := s.repo.GetAll()
+	if err != nil {
+		return nil, err
+	}
+
+	// เพื่อความเลิศ: วนลูปแปะข้อมูล Category ให้สินค้าทุกชิ้นเหมือนตัว Filter
+	for i := range products {
+		cat, _ := s.categoryRepo.GetByID(products[i].CategoryID)
+		products[i].Category = cat
+	}
+	return products, nil
+}
+
+// 2. ดึงสินค้าตาม ID
+func (s *productService) FetchByID(id uint) (*domain.Product, error) {
+	product, err := s.repo.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// แนบหมวดหมู่ให้ตอนกดดูสินค้า 1 ชิ้น
+	cat, _ := s.categoryRepo.GetByID(product.CategoryID)
+	product.Category = cat
+	return product, nil
+}
+
+// 3. ดึงสินค้าตามหมวดหมู่
 func (s *productService) FetchByCategoryID(categoryID uint) ([]domain.Product, error) {
-	return s.repo.GetByCategoryID(categoryID)
+	products, err := s.repo.GetByCategoryID(categoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	// แปะข้อมูลหมวดหมู่กลับเข้าไปด้วย
+	cat, _ := s.categoryRepo.GetByID(categoryID)
+	for i := range products {
+		products[i].Category = cat
+	}
+	return products, nil
 }
-func (s *productService) FetchWithFilter(
-	categoryID *uint,
-	minPrice *float64,
-	maxPrice *float64,
-) ([]domain.Product, error) {
 
-	return s.repo.GetWithFilter(categoryID, minPrice, maxPrice)
+// 4. ดึงสินค้าพร้อม Filter และ Pagination (เช็คให้ชัวร์ว่ามีพารามิเตอร์ครบ 5 ตัว)
+func (s *productService) FetchWithFilter(categoryID *uint, minPrice *float64, maxPrice *float64, page int, limit int) ([]domain.Product, error) {
+	// คำนวณ Offset
+	offset := (page - 1) * limit
+	products, err := s.repo.GetWithFilter(categoryID, minPrice, maxPrice, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range products {
+		cat, _ := s.categoryRepo.GetByID(products[i].CategoryID)
+		products[i].Category = cat
+	}
+	return products, nil
 }
-
-// ... (ฟังก์ชันอื่นเดิม) ...
-
-// ✅ เพิ่มฟังก์ชันนี้ลงไปท้ายไฟล์
 func (s *productService) RemoveVariant(variantID uint) error {
-	return s.repo.DeleteVariant(variantID)
+	// เรียกใช้ Repository เพื่อสั่งลบข้อมูลออกจาก Database
+	err := s.repo.DeleteVariant(variantID)
+	if err != nil {
+		return errors.New("ไม่พบ Variant นี้ในระบบ (ลบไม่สำเร็จ)")
+	}
+	return nil
 }

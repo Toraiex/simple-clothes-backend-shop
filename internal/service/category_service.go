@@ -7,12 +7,18 @@ import (
 	"simple-clothes-shop/internal/domain"
 )
 
+// 👇 1. อัปเดต Struct ให้รับ ProductRepo เข้ามาด้วย
 type categoryService struct {
-	repo domain.CategoryRepository
+	repo        domain.CategoryRepository
+	productRepo domain.ProductRepository
 }
 
-func NewCategoryService(repo domain.CategoryRepository) domain.CategoryService {
-	return &categoryService{repo: repo}
+// 👇 2. อัปเดต Constructor
+func NewCategoryService(repo domain.CategoryRepository, productRepo domain.ProductRepository) domain.CategoryService {
+	return &categoryService{
+		repo:        repo,
+		productRepo: productRepo,
+	}
 }
 
 func (s *categoryService) FetchAll() ([]domain.Category, error) {
@@ -20,7 +26,18 @@ func (s *categoryService) FetchAll() ([]domain.Category, error) {
 }
 
 func (s *categoryService) GetCategory(id uint) (*domain.Category, error) {
-	return s.repo.GetByID(id)
+	category, err := s.repo.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// 👈 สั่งไปดึงสินค้าทั้งหมดที่อยู่ในหมวดหมู่นี้ มายัดใส่ Struct
+	products, err := s.productRepo.GetByCategoryID(id)
+	if err == nil {
+		category.Products = products
+	}
+
+	return category, nil
 }
 
 func (s *categoryService) CreateCategory(name string) error {

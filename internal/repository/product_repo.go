@@ -79,18 +79,21 @@ func (r *productRepository) GetByCategoryID(categoryID uint) ([]domain.Product, 
 	return products, err
 }
 
+// ==========================================
+// 1. สร้างสินค้าใหม่ (แก้บัค Timestamp)
+// ==========================================
 func (r *productRepository) Create(product *domain.Product) error {
-
 	tx, err := r.db.Beginx()
 	if err != nil {
 		return err
 	}
 
+	// 1. บันทึกข้อมูล Product หลัก
 	err = tx.QueryRow(`
 		INSERT INTO products
 		(name, description, price, stock, category_id, images)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id
+		RETURNING id, created_at, updated_at -- 👈 ขอ 3 ค่านี้กลับมาจาก Database
 	`,
 		product.Name,
 		product.Description,
@@ -98,25 +101,28 @@ func (r *productRepository) Create(product *domain.Product) error {
 		product.Stock,
 		product.CategoryID,
 		product.Images,
-	).Scan(&product.ID)
+	).Scan(&product.ID, &product.CreatedAt, &product.UpdatedAt) // 👈 จับยัดกลับเข้า Struct ทันที
 
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 
-	for _, v := range product.Variants {
-		_, err := tx.Exec(`
+	// 2. บันทึกข้อมูล Variants (สี/ไซส์)
+	// 💡 ต้องใช้ for i := range เพื่อให้อ้างอิงถึงตำแหน่งตัวแปรจริงๆ (Pointer) ใน Array
+	for i := range product.Variants {
+		err := tx.QueryRow(`
 			INSERT INTO product_variants
 			(product_id, sku, attributes, price, stock)
 			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id, created_at, updated_at -- 👈 ขอค่ากลับมาเหมือนกัน
 		`,
 			product.ID,
-			v.SKU,
-			v.Attributes,
-			v.Price,
-			v.Stock,
-		)
+			product.Variants[i].SKU,
+			product.Variants[i].Attributes,
+			product.Variants[i].Price,
+			product.Variants[i].Stock,
+		).Scan(&product.Variants[i].ID, &product.Variants[i].CreatedAt, &product.Variants[i].UpdatedAt)
 
 		if err != nil {
 			tx.Rollback()
@@ -128,47 +134,51 @@ func (r *productRepository) Create(product *domain.Product) error {
 }
 
 func (r *productRepository) Update(id uint, product *domain.Product) error {
-	// 1. เริ่ม Transaction (เพราะเราต้องแก้หลายตาราง)
 	tx, err := r.db.Beginx()
 	if err != nil {
 		return err
 	}
 
-	// 2. อัปเดตข้อมูลสินค้าหลัก (Product)
-	// ใช้ COALESCE หรือเช็คก่อนอัปเดต ถ้าอยากทำ Patch แบบละเอียด แต่ในที่นี้ Update หมดตามฟิลด์ที่ส่งมา
-	_, err = tx.Exec(`
+	// 1. อัปเดตสินค้าหลัก
+	err = tx.QueryRow(`
         UPDATE products
         SET name=$1, description=$2, price=$3, stock=$4, category_id=$5, images=$6, updated_at=NOW()
         WHERE id=$7
+        RETURNING updated_at -- 👈 ขอเวลาที่เพิ่งอัปเดตกลับมา
     `,
 		product.Name, product.Description, product.Price,
 		product.Stock, product.CategoryID, product.Images, id,
-	)
+	).Scan(&product.UpdatedAt) // 👈 ยัดใส่ Struct
+
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 
-	// 3. จัดการ Variants (Loop เช็คทีละตัว)
-	for _, v := range product.Variants {
+	// 2. จัดการ Variants
+	for i := range product.Variants {
+		v := &product.Variants[i] // ใช้ Pointer ช่วยให้โค้ดสั้นลง
+
 		if v.ID == 0 {
-			// ✅ กรณีที่ 1: ไม่มี ID ส่งมา = "สร้าง Variant ใหม่" (Insert)
-			_, err := tx.Exec(`
+			// สร้างใหม่ (Insert)
+			err := tx.QueryRow(`
                 INSERT INTO product_variants (product_id, sku, attributes, price, stock)
                 VALUES ($1, $2, $3, $4, $5)
-            `, id, v.SKU, v.Attributes, v.Price, v.Stock)
+                RETURNING id, created_at, updated_at
+            `, id, v.SKU, v.Attributes, v.Price, v.Stock).Scan(&v.ID, &v.CreatedAt, &v.UpdatedAt)
 
 			if err != nil {
 				tx.Rollback()
 				return err
 			}
 		} else {
-			// ✅ กรณีที่ 2: มี ID ส่งมา = "แก้ไข Variant เดิม" (Update)
-			_, err := tx.Exec(`
+			// แก้ไขอันเดิม (Update)
+			err := tx.QueryRow(`
                 UPDATE product_variants
                 SET sku=$1, attributes=$2, price=$3, stock=$4, updated_at=NOW()
                 WHERE id=$5 AND product_id=$6
-            `, v.SKU, v.Attributes, v.Price, v.Stock, v.ID, id)
+                RETURNING updated_at
+            `, v.SKU, v.Attributes, v.Price, v.Stock, v.ID, id).Scan(&v.UpdatedAt)
 
 			if err != nil {
 				tx.Rollback()
@@ -177,7 +187,6 @@ func (r *productRepository) Update(id uint, product *domain.Product) error {
 		}
 	}
 
-	// 4. จบงาน
 	return tx.Commit()
 }
 
@@ -200,6 +209,8 @@ func (r *productRepository) GetWithFilter(
 	categoryID *uint,
 	minPrice *float64,
 	maxPrice *float64,
+	limit int, // 👈 เพิ่ม Limit (จำนวนต่อหน้า)
+	offset int, // 👈 เพิ่ม Offset (จุดเริ่มต้น)
 ) ([]domain.Product, error) {
 
 	query := `
@@ -210,8 +221,9 @@ func (r *productRepository) GetWithFilter(
 	`
 
 	args := []interface{}{}
-	argID := 1
+	argID := 1 // เริ่มนับตัวแปรที่ $1
 
+	// ตรวจสอบเงื่อนไขทีละข้อ
 	if categoryID != nil {
 		query += " AND category_id=$" + fmt.Sprint(argID)
 		args = append(args, *categoryID)
@@ -230,10 +242,17 @@ func (r *productRepository) GetWithFilter(
 		argID++
 	}
 
+	// เรียงลำดับจากใหม่ไปเก่า
 	query += " ORDER BY id DESC"
+
+	// 🚀 ใส่ Pagination เข้าไปท้ายสุด
+	// ตัวอย่าง: LIMIT $4 OFFSET $5
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argID, argID+1)
+	args = append(args, limit, offset)
 
 	var products []domain.Product
 
+	// สั่งรัน Query พร้อมตัวแปรทั้งหมด
 	err := r.db.Select(&products, query, args...)
 	return products, err
 }

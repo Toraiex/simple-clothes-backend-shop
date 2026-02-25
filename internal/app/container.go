@@ -44,7 +44,7 @@ func NewHandlersContainer(db *sqlx.DB) *HandlersContainer {
 	userService := service.NewUserService(userRepo, sessionRepo, emailService)
 
 	productService := service.NewProductService(productRepo, categoryRepo)
-	categoryService := service.NewCategoryService(categoryRepo)
+	categoryService := service.NewCategoryService(categoryRepo, productRepo)
 
 	if os.Getenv("AUTO_SEED_ADMIN") == "true" {
 		SeedAdmin(userService, userRepo)

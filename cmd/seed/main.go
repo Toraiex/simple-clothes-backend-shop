@@ -45,8 +45,9 @@ func main() {
 	database.Connect()
 	db := database.DB
 
+	productRepo := repository.NewProductRepository(db) // 👈 ต้องมีบรรทัดนี้
 	categoryRepo := repository.NewCategoryRepository(db)
-	categoryService := service.NewCategoryService(categoryRepo)
+	categoryService := service.NewCategoryService(categoryRepo, productRepo)
 
 	log.Println("🌱 กำลังเริ่มกระบวนการ Seed ข้อมูลจาก Platzi...")
 
@@ -60,28 +61,39 @@ func main() {
 }
 
 func seedCategories(svc domain.CategoryService) {
-	log.Println("...กำลังดึงข้อมูล Categories")
+	log.Println("...กำลังดึงข้อมูล Categories จาก API ภายนอก")
 	resp, err := http.Get("https://api.escuelajs.co/api/v1/categories")
 	if err != nil {
 		log.Fatalf("ดึงข้อมูลไม่สำเร็จ: %v", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalf("อ่านข้อมูล Body ไม่สำเร็จ: %v", err)
-	}
-
+	body, _ := io.ReadAll(resp.Body)
 	var platziCategories []PlatziCategory
 	_ = json.Unmarshal(body, &platziCategories)
 
+	// ✅ 1. กำหนดหมวดหมู่ที่เรา "อนุญาต" ให้เข้าเครื่องเรา (White-list)
+	allowedCategories := map[string]bool{
+		"Clothes":     true,
+		"Electronics": true,
+		"Furniture":   true,
+		"Shoes":       true,
+		"Others":      true,
+	}
+
 	for _, cat := range platziCategories {
-		err := svc.CreateCategory(cat.Name)
-		if err != nil && !strings.Contains(err.Error(), "มีอยู่ในระบบแล้ว") {
-			log.Printf("❌ สร้างหมวดหมู่ '%s' ไม่สำเร็จ: %v\n", cat.Name, err)
+		// ✅ 2. เช็คว่าชื่อหมวดหมู่ที่ดึงมา อยู่ในลิสต์ที่เราต้องการไหม
+		// ถ้าเป็นพวกชื่อไฟล์ .xlsx หรือชื่อมั่วๆ มันจะไม่ผ่านเงื่อนไขนี้ครับ
+		if allowedCategories[cat.Name] {
+			err := svc.CreateCategory(cat.Name)
+			if err != nil && !strings.Contains(err.Error(), "มีอยู่ในระบบแล้ว") {
+				log.Printf("❌ สร้างหมวดหมู่ '%s' ไม่สำเร็จ: %v\n", cat.Name, err)
+			} else {
+				log.Printf("   ✅ เพิ่มหมวดหมู่: %s\n", cat.Name)
+			}
 		}
 	}
-	log.Println("✔️ จัดการข้อมูลหมวดหมู่เสร็จสิ้น")
+	log.Println("✔️ จัดการข้อมูลหมวดหมู่ที่ถูกต้องเสร็จสิ้น")
 }
 
 func seedProductsAndVariants(db *sqlx.DB) {

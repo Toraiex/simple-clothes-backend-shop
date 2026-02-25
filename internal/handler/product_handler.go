@@ -53,12 +53,20 @@ func (h *ProductHandler) GetAll(c *fiber.Ctx) error {
 		maxPrice = &price
 	}
 
-	products, err := h.service.FetchWithFilter(categoryID, minPrice, maxPrice)
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+
+	// เรียก Service
+	products, err := h.service.FetchWithFilter(categoryID, minPrice, maxPrice, page, limit)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(products)
+	return c.JSON(fiber.Map{
+		"page":  page,
+		"limit": limit,
+		"data":  products,
+	})
 }
 
 // 🟢 ดึงสินค้าตาม ID

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"regexp"
 	"simple-clothes-shop/internal/domain"
 	"strconv"
 	"time"
@@ -30,29 +31,27 @@ func NewUserHandler(service domain.UserService) *UserHandler {
 func (h *UserHandler) Register(c *fiber.Ctx) error {
 
 	type RegisterInput struct {
-		Username string `json:"username" validate:"required,min=6"` // บังคับกรอก, ขั้นต่ำ 6 ตัว
-		Password string `json:"password" validate:"required,min=6"` // บังคับกรอก, ขั้นต่ำ 6 ตัว
-		Address  string `json:"address"`                            // ไม่บังคับ
-		Phone    string `json:"phone" `
-		Email    string `json:"email" validate:"required,email"` // บังคับกรอก, ต้องเป็นฟอร์แมตอีเมล
+		Username string `json:"username" validate:"required,min=6,max=20"`
+		Password string `json:"password" validate:"required,min=6.max=20"`
+		Address  string `json:"address"`
+		Phone    string `json:"phone" validate:"len=10,numeric"`
+		Email    string `json:"email" validate:"required,email"`
 	}
 
 	var input RegisterInput
-
-	// ดึงข้อมูลจาก Body มาใส่ Struct
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
+		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
-	// ✅ 4. สั่งตรวจสอบข้อมูลตามกฎที่เราเขียนไว้ใน Tag
 	if err := validate.Struct(&input); err != nil {
-		// ถ้าข้อมูลไม่ตรงเงื่อนไข ให้เตะกลับไปพร้อมบอกว่าฟิลด์ไหนผิด
+		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ผ่านเกณฑ์ (เช่น Username ต้องเป็นภาษาอังกฤษ/ตัวเลข 4 ตัวขึ้นไป)"})
+	}
+
+	if !isComplexPassword(input.Password) {
 		return c.Status(400).JSON(fiber.Map{
-			"error":   "ข้อมูลไม่ผ่านเกณฑ์การตรวจสอบ (เช่น อีเมลผิดรูปแบบ หรือ รหัสผ่านสั้นเกินไป)",
-			"details": err.Error(),
+			"error": "รหัสผ่านไม่ปลอดภัยพอ: ต้องมีตัวพิมพ์ใหญ่, ตัวพิมพ์เล็ก, ตัวเลข และสัญลักษณ์อย่างน้อย 1 ตัว",
 		})
 	}
-
 	// ✅ 5. ถ้าข้อมูลเป๊ะหมด ค่อยประกอบร่างส่งให้ Service (โค้ดส่วนนี้ของคุณเขียนดีแล้วครับ)
 	user := domain.User{
 		Username: input.Username,
@@ -337,24 +336,34 @@ func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
 	var input struct {
 		Email       string `json:"email" validate:"required,email"`
 		OTP         string `json:"otp" validate:"required,len=6"`
-		NewPassword string `json:"new_password" validate:"required,min=6,max=20"`
+		NewPassword string `json:"new_password" validate:"required,min=8"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
 	}
 
-	// ตรวจสอบความยาวรหัสผ่านเบื้องต้น
-	if len(input.NewPassword) < 6 {
-		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร"})
+	if err := validate.Struct(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้องตามรูปแบบ"})
 	}
 
-	err := h.service.ResetPassword(input.Email, input.OTP, input.NewPassword)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	// ✅ ตรวจสอบความปลอดภัยรหัสผ่านใหม่
+	if !isComplexPassword(input.NewPassword) {
+		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านใหม่ต้องมีตัวพิมพ์ใหญ่, ตัวเล็ก, ตัวเลข และสัญลักษณ์"})
 	}
 
 	return c.JSON(fiber.Map{
 		"message": "รีเซ็ตรหัสผ่านสำเร็จ! คุณสามารถเข้าสู่ระบบด้วยรหัสผ่านใหม่ได้ทันที",
 	})
+}
+
+func isComplexPassword(pass string) bool {
+	// กฎ: ตัวเล็กอย่างน้อยหนึ่ง, ตัวใหญ่อย่างน้อยหนึ่ง, ตัวเลขอย่างน้อยหนึ่ง, สัญลักษณ์อย่างน้อยหนึ่ง
+	var (
+		hasLower   = regexp.MustCompile(`[a-z]`).MatchString(pass)
+		hasUpper   = regexp.MustCompile(`[A-Z]`).MatchString(pass)
+		hasNumber  = regexp.MustCompile(`[0-9]`).MatchString(pass)
+		hasSpecial = regexp.MustCompile(`[!@#$%^&*]`).MatchString(pass)
+	)
+	return hasLower && hasUpper && hasNumber && hasSpecial
 }
