@@ -290,12 +290,23 @@ func (s *userService) ResendOTP(email string) error {
 		return errors.New("ไม่พบอีเมลนี้ในระบบ")
 	}
 
-	// 2. สร้าง OTP ใหม่
-	newOTP := generateOTP()
-	newExpiresAt := time.Now().Add(15 * time.Minute)
+	now := time.Now()
 
-	// 3. อัปเดตลง DB
-	err = s.userRepo.UpdateOTP(user.ID, newOTP, newExpiresAt)
+	// 1) cooldown 60 วิ
+	if user.LastVerificationOTPSentAt != nil && now.Sub(*user.LastVerificationOTPSentAt) < 60*time.Second {
+		return errors.New("คุณเพิ่งขอรหัสไปเมื่อสักครู่ กรุณารอ 60 วินาทีแล้วลองใหม่")
+	}
+
+	// 2) max resend ต่อรอบ (เช่น 5 ครั้งใน 15 นาที)
+	if user.VerificationOTPResendCount >= 5 && user.OTPExpiresAt != nil && now.Before(*user.OTPExpiresAt) {
+		return errors.New("คุณขอรหัสบ่อยเกินไป กรุณารอให้รหัสปัจจุบันหมดอายุก่อน")
+	}
+
+	// ผ่านแล้วค่อย generate OTP ใหม่ + อัปเดต
+	newOTP := generateOTP()
+	expiresAt := now.Add(15 * time.Minute)
+
+	err = s.userRepo.UpdateOTPWithRateLimit(user.ID, newOTP, expiresAt, now, user.VerificationOTPResendCount+1)
 	if err != nil {
 		return err
 	}
@@ -319,8 +330,10 @@ func (s *userService) ForgotPassword(email string) error {
 
 	otp := generateOTP() // ใช้ฟังก์ชันสุ่ม OTP เดิมที่มีอยู่แล้ว
 	expiresAt := time.Now().Add(15 * time.Minute)
+	now := time.Now()
 
-	err = s.userRepo.UpdateOTP(user.ID, otp, expiresAt) // ใช้ฟังก์ชันอัปเดต OTP เดิมที่มี
+	// อัปเดต OTP สำหรับ reset password พร้อมรีเซ็ตข้อมูล rate limit ฝั่ง reset
+	err = s.userRepo.UpdateResetOTPWithRateLimit(user.ID, otp, expiresAt, now, 0)
 	if err != nil {
 		return err
 	}
@@ -344,7 +357,7 @@ func (s *userService) ResetPassword(email, otp, newPassword string) error {
 		return errors.New("ไม่พบอีเมลนี้ในระบบ")
 	}
 
-	if user.OTPCode != otp || time.Now().After(*user.OTPExpiresAt) {
+	if user.OTPCode != otp || user.OTPExpiresAt == nil || time.Now().After(*user.OTPExpiresAt) {
 		return errors.New("รหัส OTP ไม่ถูกต้องหรือหมดอายุแล้ว")
 	}
 
@@ -359,6 +372,40 @@ func (s *userService) ResetPassword(email, otp, newPassword string) error {
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+// 3. ฟังก์ชันขอส่ง OTP สำหรับรีเซ็ตรหัสผ่านซ้ำ (Resend Reset OTP)
+func (s *userService) ResendResetOTP(email string) error {
+	user, err := s.userRepo.GetByEmail(email)
+	if err != nil {
+		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+	}
+
+	now := time.Now()
+
+	// 1) cooldown 60 วิ สำหรับ reset OTP
+	if user.LastResetOTPSentAt != nil && now.Sub(*user.LastResetOTPSentAt) < 60*time.Second {
+		return errors.New("คุณเพิ่งขอรหัสรีเซ็ตรหัสผ่านไปเมื่อสักครู่ กรุณารอ 60 วินาทีแล้วลองใหม่")
+	}
+
+	// 2) max resend ต่อรอบ (เช่น 5 ครั้งใน 15 นาที) สำหรับ reset OTP
+	if user.ResetOTPResendCount >= 5 && user.OTPExpiresAt != nil && now.Before(*user.OTPExpiresAt) {
+		return errors.New("คุณขอรหัสรีเซ็ตรหัสผ่านบ่อยเกินไป กรุณารอให้รหัสปัจจุบันหมดอายุก่อน")
+	}
+
+	newOTP := generateOTP()
+	expiresAt := now.Add(15 * time.Minute)
+
+	err = s.userRepo.UpdateResetOTPWithRateLimit(user.ID, newOTP, expiresAt, now, user.ResetOTPResendCount+1)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		_ = s.emailSvc.SendPasswordResetEmail(user.Email, newOTP)
+	}()
 
 	return nil
 }

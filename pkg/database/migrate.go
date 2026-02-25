@@ -60,7 +60,6 @@ func RunMigrations(db *sql.DB, action string) {
 
 	m.Log = &migrationLogger{}
 
-	// ✅ ใช้ Switch-Case เพื่อเลือกว่าจะทำอะไรตามค่า action ที่ส่งมา
 	switch action {
 	case "up":
 		err = m.Up()

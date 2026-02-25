@@ -31,6 +31,7 @@ func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api.Post("/resend-otp", authLimiter, h.User.ResendOTP)
 
 	api.Post("/forgot-password", h.User.ForgotPassword)
+	api.Post("/resend-reset-otp", authLimiter, h.User.ResendResetOTP)
 	api.Post("/reset-password", h.User.ResetPassword)
 
 	api.Get("/users", handler.AuthMiddleware, handler.IsAdmin, h.User.GetAllUsers) // 👈 เพิ่มใหม่สำหรับ Admin

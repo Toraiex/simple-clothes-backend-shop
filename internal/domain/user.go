@@ -21,6 +21,12 @@ type User struct {
 	IsVerified   bool       `db:"is_verified" json:"is_verified"`
 	OTPCode      string     `db:"otp_code" json:"-"`
 	OTPExpiresAt *time.Time `db:"otp_expires_at" json:"-"`
+
+	LastVerificationOTPSentAt  *time.Time `db:"last_verification_otp_sent_at"`
+	VerificationOTPResendCount int        `db:"verification_otp_resend_count"`
+
+	LastResetOTPSentAt  *time.Time `db:"last_reset_otp_sent_at"`
+	ResetOTPResendCount int        `db:"reset_otp_resend_count"`
 }
 
 // โครงสร้างข้อมูลให้ตรงกับตาราง sessions
@@ -46,6 +52,8 @@ type UserRepository interface {
 
 	UpdateVerificationStatus(userID uint) error
 	UpdateOTP(userID uint, otp string, expiresAt time.Time) error
+	UpdateOTPWithRateLimit(userID uint, otp string, expiresAt time.Time, sentAt time.Time, resendCount int) error
+	UpdateResetOTPWithRateLimit(userID uint, otp string, expiresAt time.Time, sentAt time.Time, resendCount int) error
 	UpdatePassword(userID uint, newPassword string) error
 }
 
@@ -63,6 +71,7 @@ type UserService interface {
 	ResendOTP(email string) error
 	ForgotPassword(email string) error
 	ResetPassword(email string, otp string, newPassword string) error
+	ResendResetOTP(email string) error
 }
 
 type SessionRepository interface {

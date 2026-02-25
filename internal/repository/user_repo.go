@@ -112,16 +112,31 @@ func (r *userRepository) GetByEmail(email string) (*domain.User, error) {
 	var user domain.User
 	// ✅ ใช้ COALESCE(column, '') เพื่อป้องกัน Error ตอนเจอค่า NULL ใน string
 	query := `
-        SELECT id, username, password, role, address, phone, email, is_verified, 
-               COALESCE(otp_code, ''), 
-               otp_expires_at 
-        FROM users WHERE email = $1
+        SELECT 
+			id, 
+			username, 
+			password, 
+			role, 
+			address, 
+			phone, 
+			email,
+			is_verified,
+            COALESCE(otp_code, ''),
+            otp_expires_at,
+			last_verification_otp_sent_at,
+			verification_otp_resend_count,
+			last_reset_otp_sent_at,
+			reset_otp_resend_count
+        FROM users 
+		WHERE email = $1
     `
 
 	err := r.db.QueryRow(query, email).Scan(
 		&user.ID, &user.Username, &user.Password, &user.Role,
 		&user.Address, &user.Phone, &user.Email, &user.IsVerified,
 		&user.OTPCode, &user.OTPExpiresAt, // OTPExpiresAt เป็น pointer (*time.Time) อยู่แล้วเลยรับ NULL ได้
+		&user.LastVerificationOTPSentAt, &user.VerificationOTPResendCount,
+		&user.LastResetOTPSentAt, &user.ResetOTPResendCount,
 	)
 	return &user, err
 }
@@ -154,5 +169,39 @@ func (r *userRepository) UpdatePassword(userID uint, newPassword string) error {
 		WHERE id = $2
 	`
 	_, err := r.db.Exec(query, newPassword, userID)
+	return err
+}
+
+// ==========================================
+// อัปเดต OTP พร้อมข้อมูล Rate Limit การส่งซ้ำ
+// ==========================================
+func (r *userRepository) UpdateOTPWithRateLimit(userID uint, otp string, expiresAt time.Time, sentAt time.Time, resendCount int) error {
+	query := `
+		UPDATE users
+		SET 
+			otp_code = $1,
+			otp_expires_at = $2,
+			last_verification_otp_sent_at = $3,
+			verification_otp_resend_count = $4
+		WHERE id = $5
+	`
+	_, err := r.db.Exec(query, otp, expiresAt, sentAt, resendCount, userID)
+	return err
+}
+
+// ==========================================
+// อัปเดต OTP สำหรับ Reset Password พร้อม Rate Limit
+// ==========================================
+func (r *userRepository) UpdateResetOTPWithRateLimit(userID uint, otp string, expiresAt time.Time, sentAt time.Time, resendCount int) error {
+	query := `
+		UPDATE users
+		SET
+			otp_code = $1,
+			otp_expires_at = $2,
+			last_reset_otp_sent_at = $3,
+			reset_otp_resend_count = $4
+		WHERE id = $5
+	`
+	_, err := r.db.Exec(query, otp, expiresAt, sentAt, resendCount, userID)
 	return err
 }

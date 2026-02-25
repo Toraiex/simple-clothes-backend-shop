@@ -329,6 +329,29 @@ func (h *UserHandler) ForgotPassword(c *fiber.Ctx) error {
 	})
 }
 
+// 7.1 ขอส่งรหัส OTP สำหรับรีเซ็ตรหัสผ่านซ้ำ (Resend Reset OTP)
+func (h *UserHandler) ResendResetOTP(c *fiber.Ctx) error {
+	var input struct {
+		Email string `json:"email" validate:"required,email"`
+	}
+
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
+	}
+
+	if err := validate.Struct(&input); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้องตามรูปแบบ"})
+	}
+
+	if err := h.service.ResendResetOTP(input.Email); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "ส่งรหัส OTP สำหรับรีเซ็ตรหัสผ่านใหม่ไปที่อีเมลของคุณแล้ว",
+	})
+}
+
 // ==========================================
 // 8. ตั้งรหัสผ่านใหม่ (Reset Password)
 // ==========================================
@@ -350,6 +373,10 @@ func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
 	// ✅ ตรวจสอบความปลอดภัยรหัสผ่านใหม่
 	if !isComplexPassword(input.NewPassword) {
 		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านใหม่ต้องมีตัวพิมพ์ใหญ่, ตัวเล็ก, ตัวเลข และสัญลักษณ์"})
+	}
+
+	if err := h.service.ResetPassword(input.Email, input.OTP, input.NewPassword); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{

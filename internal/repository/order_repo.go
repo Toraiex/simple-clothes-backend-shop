@@ -48,10 +48,9 @@ func (r *orderRepository) CreateOrderFromCart(userID uint, cartItems []domain.Ca
 			return nil, err
 		}
 
-		// ถ้า update ไม่ได้ (rows == 0) แปลว่าของชิ้นนั้นสต็อกไม่พอ!
 		if rows == 0 {
 			tx.Rollback()
-			// บอกไปเลยว่าสินค้าตัวไหนหมด (ดึงชื่อมาจาก JOIN ตอน GetCartItems)
+
 			errMsg := fmt.Sprintf("สินค้า '%s' สี %s ไซส์ %s ในสต็อกมีไม่เพียงพอ",
 				item.Product.Name, item.Variant.Attributes["Color"], item.Variant.Attributes["Size"])
 			return nil, errors.New(errMsg)
