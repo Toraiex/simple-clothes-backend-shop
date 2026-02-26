@@ -12,6 +12,13 @@ import (
 
 var validate = validator.New()
 
+var (
+	regexLower   = regexp.MustCompile(`[a-z]`)
+	regexUpper   = regexp.MustCompile(`[A-Z]`)
+	regexNumber  = regexp.MustCompile(`[0-9]`)
+	regexSpecial = regexp.MustCompile(`[!@#$%^&*]`)
+)
+
 type UserHandler struct {
 	service domain.UserService
 }
@@ -25,9 +32,6 @@ func NewUserHandler(service domain.UserService) *UserHandler {
 	return &UserHandler{service: service}
 }
 
-// ==========================================
-// 1. ลงทะเบียน (Register)
-// ==========================================
 func (h *UserHandler) Register(c *fiber.Ctx) error {
 
 	type RegisterInput struct {
@@ -385,12 +389,8 @@ func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
 }
 
 func isComplexPassword(pass string) bool {
-	// กฎ: ตัวเล็กอย่างน้อยหนึ่ง, ตัวใหญ่อย่างน้อยหนึ่ง, ตัวเลขอย่างน้อยหนึ่ง, สัญลักษณ์อย่างน้อยหนึ่ง
-	var (
-		hasLower   = regexp.MustCompile(`[a-z]`).MatchString(pass)
-		hasUpper   = regexp.MustCompile(`[A-Z]`).MatchString(pass)
-		hasNumber  = regexp.MustCompile(`[0-9]`).MatchString(pass)
-		hasSpecial = regexp.MustCompile(`[!@#$%^&*]`).MatchString(pass)
-	)
-	return hasLower && hasUpper && hasNumber && hasSpecial
+	return regexLower.MatchString(pass) &&
+		regexUpper.MatchString(pass) &&
+		regexNumber.MatchString(pass) &&
+		regexSpecial.MatchString(pass)
 }
