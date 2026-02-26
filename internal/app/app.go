@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
+	"github.com/redis/go-redis/v9"
 )
 
 type App struct {
@@ -17,8 +18,12 @@ func NewApp() *App {
 	// 1. Connect DB
 	database.Connect()
 	db := database.DB
-
-	handlers := NewHandlersContainer(db)
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "127.0.0.1:6379", // ปกติ Redis รันที่พอร์ตนี้
+		Password: "",               // ปล่อยว่างถ้าไม่ได้ตั้งรหัส
+		DB:       0,                // ใช้ DB 0
+	})
+	handlers := NewHandlersContainer(db, rdb)
 	app := fiber.New()
 
 	app.Use(

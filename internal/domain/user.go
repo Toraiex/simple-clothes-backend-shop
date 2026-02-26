@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type Role string
 
@@ -17,16 +20,8 @@ type User struct {
 	Address  string `db:"address"`
 	Phone    string `db:"phone" json:"phone"`
 
-	Email        string     `db:"email" json:"email"`
-	IsVerified   bool       `db:"is_verified" json:"is_verified"`
-	OTPCode      string     `db:"otp_code" json:"-"`
-	OTPExpiresAt *time.Time `db:"otp_expires_at" json:"-"`
-
-	LastVerificationOTPSentAt  *time.Time `db:"last_verification_otp_sent_at"`
-	VerificationOTPResendCount int        `db:"verification_otp_resend_count"`
-
-	LastResetOTPSentAt  *time.Time `db:"last_reset_otp_sent_at"`
-	ResetOTPResendCount int        `db:"reset_otp_resend_count"`
+	Email      string `db:"email" json:"email"`
+	IsVerified bool   `db:"is_verified" json:"is_verified"`
 }
 
 // โครงสร้างข้อมูลให้ตรงกับตาราง sessions
@@ -51,27 +46,25 @@ type UserRepository interface {
 	GetByEmail(email string) (*User, error)
 
 	UpdateVerificationStatus(userID uint) error
-	UpdateOTP(userID uint, otp string, expiresAt time.Time) error
-	UpdateOTPWithRateLimit(userID uint, otp string, expiresAt time.Time, sentAt time.Time, resendCount int) error
-	UpdateResetOTPWithRateLimit(userID uint, otp string, expiresAt time.Time, sentAt time.Time, resendCount int) error
 	UpdatePassword(userID uint, newPassword string) error
 }
 
 // 3. Service Interface
 type UserService interface {
-	Register(user *User) error
-	Login(username, password, userAgent, clientIP string) (string, string, string, error)
+	Register(ctx context.Context, user *User) error
+	Login(ctx context.Context, username, password string) (string, string, string, error)
 	GetUser(requesterID uint, requesterRole Role, targetID uint) (*User, error)
 	UpdateUser(requesterID uint, requesterRole Role, targetID uint, input *User) error
 	GetAllUsers(requesterRole Role) ([]*User, error)
 
-	RefreshAccessToken(refreshToken string) (string, string, error)
-	Logout(refreshToken string) error
-	VerifyEmail(email string, otp string) error
-	ResendOTP(email string) error
-	ForgotPassword(email string) error
-	ResetPassword(email string, otp string, newPassword string) error
-	ResendResetOTP(email string) error
+	RefreshAccessToken(ctx context.Context, refreshToken string) (string, string, error)
+	Logout(ctx context.Context, refreshToken string) error
+
+	VerifyEmail(ctx context.Context, email string, otp string) error
+	ResendOTP(ctx context.Context, email string) error
+	ForgotPassword(ctx context.Context, email string) error
+	ResetPassword(ctx context.Context, email string, otp string, newPassword string) error
+	ResendResetOTP(ctx context.Context, email string) error
 }
 
 type SessionRepository interface {

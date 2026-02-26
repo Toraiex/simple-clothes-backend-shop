@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context" // 1. ต้องเพิ่ม import context
 	"log"
 	"os"
 
@@ -25,15 +26,15 @@ func SeedAdmin(userService domain.UserService, userRepo domain.UserRepository) {
 		return
 	}
 
-	// ถ้าไม่มี → สร้าง
-	err := userService.Register(&domain.User{
+	// ✅ 2. แก้ไขไวยากรณ์การสร้าง User และส่ง Context
+	err := userService.Register(context.Background(), &domain.User{
 		Username: username,
 		Password: password,
 		Role:     domain.RoleAdmin,
 	})
 
 	if err != nil {
-		log.Println("seed admin failed:", err)
+		log.Println("🚨 seed admin failed:", err)
 		return
 	}
 

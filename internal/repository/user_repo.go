@@ -2,7 +2,6 @@ package repository
 
 import (
 	"simple-clothes-shop/internal/domain"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -19,28 +18,15 @@ func NewUserRepository(db *sqlx.DB) domain.UserRepository {
 // สร้างผู้ใช้งานใหม่ (Register)
 // ==========================================
 func (r *userRepository) Create(user *domain.User) error {
-	// ✅ อัปเดตคำสั่ง SQL ให้รองรับ Email, IsVerified, OTP และวันหมดอายุ
 	query := `
-		INSERT INTO users (
-			username, password, role, address, phone, 
-			email, is_verified, otp_code, otp_expires_at
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO users (username, password, role, address, phone, email, is_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id
 	`
-
 	err := r.db.QueryRow(query,
-		user.Username,
-		user.Password,
-		user.Role,
-		user.Address,
-		user.Phone,
-		user.Email,        // 👈 เพิ่มเข้ามา
-		user.IsVerified,   // 👈 เพิ่มเข้ามา
-		user.OTPCode,      // 👈 เพิ่มเข้ามา
-		user.OTPExpiresAt, // 👈 เพิ่มเข้ามา
+		user.Username, user.Password, user.Role,
+		user.Address, user.Phone, user.Email, user.IsVerified,
 	).Scan(&user.ID)
-
 	return err
 }
 
@@ -105,103 +91,27 @@ func (r *userRepository) GetAll() ([]*domain.User, error) {
 	return users, nil
 }
 
-// ==========================================
-// ค้นหาผู้ใช้งานจาก Email
-// ==========================================
 func (r *userRepository) GetByEmail(email string) (*domain.User, error) {
 	var user domain.User
-	// ✅ ใช้ COALESCE(column, '') เพื่อป้องกัน Error ตอนเจอค่า NULL ใน string
 	query := `
-        SELECT 
-			id, 
-			username, 
-			password, 
-			role, 
-			address, 
-			phone, 
-			email,
-			is_verified,
-            COALESCE(otp_code, ''),
-            otp_expires_at,
-			last_verification_otp_sent_at,
-			verification_otp_resend_count,
-			last_reset_otp_sent_at,
-			reset_otp_resend_count
-        FROM users 
-		WHERE email = $1
+        SELECT id, username, password, role, address, phone, email, is_verified
+        FROM users WHERE email = $1
     `
-
 	err := r.db.QueryRow(query, email).Scan(
 		&user.ID, &user.Username, &user.Password, &user.Role,
 		&user.Address, &user.Phone, &user.Email, &user.IsVerified,
-		&user.OTPCode, &user.OTPExpiresAt, // OTPExpiresAt เป็น pointer (*time.Time) อยู่แล้วเลยรับ NULL ได้
-		&user.LastVerificationOTPSentAt, &user.VerificationOTPResendCount,
-		&user.LastResetOTPSentAt, &user.ResetOTPResendCount,
 	)
 	return &user, err
 }
 
-// ==========================================
-// อัปเดตสถานะว่ายืนยันอีเมลแล้ว (และลบ OTP ทิ้ง)
-// ==========================================
 func (r *userRepository) UpdateVerificationStatus(userID uint) error {
-	query := `
-		UPDATE users 
-		SET is_verified = true, otp_code = NULL, updated_at = NOW(), otp_expires_at = NULL 
-		WHERE id = $1
-	`
+	query := `UPDATE users SET is_verified = true, updated_at = NOW() WHERE id = $1`
 	_, err := r.db.Exec(query, userID)
 	return err
 }
-func (r *userRepository) UpdateOTP(userID uint, otp string, expiresAt time.Time) error {
-	query := `UPDATE users SET otp_code = $1, otp_expires_at = $2 WHERE id = $3`
-	_, err := r.db.Exec(query, otp, expiresAt, userID)
-	return err
-}
 
-// ==========================================
-// อัปเดตรหัสผ่านใหม่ (พร้อมเคลียร์ OTP ทิ้งเพื่อความปลอดภัย)
-// ==========================================
 func (r *userRepository) UpdatePassword(userID uint, newPassword string) error {
-	query := `
-		UPDATE users 
-		SET password = $1, otp_code = NULL, updated_at = NOW(), otp_expires_at = NULL 
-		WHERE id = $2
-	`
+	query := `UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.Exec(query, newPassword, userID)
-	return err
-}
-
-// ==========================================
-// อัปเดต OTP พร้อมข้อมูล Rate Limit การส่งซ้ำ
-// ==========================================
-func (r *userRepository) UpdateOTPWithRateLimit(userID uint, otp string, expiresAt time.Time, sentAt time.Time, resendCount int) error {
-	query := `
-		UPDATE users
-		SET 
-			otp_code = $1,
-			otp_expires_at = $2,
-			last_verification_otp_sent_at = $3,
-			verification_otp_resend_count = $4
-		WHERE id = $5
-	`
-	_, err := r.db.Exec(query, otp, expiresAt, sentAt, resendCount, userID)
-	return err
-}
-
-// ==========================================
-// อัปเดต OTP สำหรับ Reset Password พร้อม Rate Limit
-// ==========================================
-func (r *userRepository) UpdateResetOTPWithRateLimit(userID uint, otp string, expiresAt time.Time, sentAt time.Time, resendCount int) error {
-	query := `
-		UPDATE users
-		SET
-			otp_code = $1,
-			otp_expires_at = $2,
-			last_reset_otp_sent_at = $3,
-			reset_otp_resend_count = $4
-		WHERE id = $5
-	`
-	_, err := r.db.Exec(query, otp, expiresAt, sentAt, resendCount, userID)
 	return err
 }

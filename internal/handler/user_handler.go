@@ -65,7 +65,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		Email:    input.Email,
 	}
 
-	if err := h.service.Register(&user); err != nil {
+	if err := h.service.Register(c.UserContext(), &user); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -89,17 +89,11 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
 	}
 
-	// ✅ 1. ให้ Fiber ดึงข้อมูลอุปกรณ์ (User-Agent) และ IP Address ของลูกค้าให้
-	userAgent := c.Get("User-Agent")
-	clientIP := c.IP()
-
-	// ✅ 2. ส่งข้อมูลทั้งหมดให้ Service ทำงานต่อ
-	accessToken, refreshToken, role, err := h.service.Login(input.Username, input.Password, userAgent, clientIP)
+	accessToken, refreshToken, role, err := h.service.Login(c.UserContext(), input.Username, input.Password)
 	if err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// สร้าง HttpOnly Cookie (เหมือนที่ทำในสเต็ปที่แล้วเป๊ะเลยครับ)
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    accessToken,
@@ -134,12 +128,12 @@ func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 	}
 
 	// ✅ รับ Token ใบใหม่มา 2 ใบ
-	newAccessToken, newRefreshToken, err := h.service.RefreshAccessToken(refreshToken)
+	newAccessToken, newRefreshToken, err := h.service.RefreshAccessToken(c.UserContext(), refreshToken)
 	if err != nil {
+		h.clearAuthCookies(c) // ท่าไม้ตายเคลียร์คุกกี้ถ้า Refresh Token พัง
 		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// ✅ อบคุกกี้ Access Token ใหม่ (ทับของเดิม)
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    newAccessToken,
@@ -149,7 +143,6 @@ func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 		SameSite: "lax",
 	})
 
-	// ✅ อบคุกกี้ Refresh Token ใหม่ (ทับของเดิม)
 	c.Cookie(&fiber.Cookie{
 		Name:     "refresh_token",
 		Value:    newRefreshToken,
@@ -252,60 +245,45 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 // 4. ออกจากระบบ (Logout)
 // ==========================================
 func (h *UserHandler) Logout(c *fiber.Ctx) error {
-	// 1. ดึง Refresh Token มาเช็ค
 	refreshToken := c.Cookies("refresh_token")
 	if refreshToken != "" {
-		// 2. ส่งให้ Service ไปจัดการบล็อกใน Database
-		_ = h.service.Logout(refreshToken)
+		// 🚀 แก้ไข: เพิ่ม c.UserContext()
+		_ = h.service.Logout(c.UserContext(), refreshToken)
 	}
 
-	// 3. ท่าไม้ตายทำลายคุกกี้: สั่งเซ็ตค่าให้ว่างเปล่า และตั้งเวลาหมดอายุเป็น "อดีต" (-1 ชั่วโมง)
-	c.Cookie(&fiber.Cookie{
-		Name:     "access_token",
-		Value:    "",
-		Expires:  time.Now().Add(-1 * time.Hour),
-		HTTPOnly: true,
-	})
+	h.clearAuthCookies(c) // เรียกใช้ Helper ให้โค้ดสั้นลง
 
-	c.Cookie(&fiber.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Expires:  time.Now().Add(-1 * time.Hour),
-		HTTPOnly: true,
-	})
-
-	return c.JSON(fiber.Map{
-		"message": "ออกจากระบบสำเร็จ",
-	})
+	return c.JSON(fiber.Map{"message": "ออกจากระบบสำเร็จ"})
 }
+
 func (h *UserHandler) VerifyEmail(c *fiber.Ctx) error {
 	var input VerifyEmailInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	err := h.service.VerifyEmail(input.Email, input.OTP)
+	// 🚀 แก้ไข: เพิ่ม c.UserContext()
+	err := h.service.VerifyEmail(c.UserContext(), input.Email, input.OTP)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "ยินดีด้วย! ยืนยันอีเมลสำเร็จแล้ว ตอนนี้คุณสามารถเข้าสู่ระบบได้เต็มรูปแบบ",
-	})
+	return c.JSON(fiber.Map{"message": "ยินดีด้วย! ยืนยันอีเมลสำเร็จแล้ว ตอนนี้คุณสามารถเข้าสู่ระบบได้เต็มรูปแบบ"})
 }
 
 // ใน user_handler.go
 func (h *UserHandler) ResendOTP(c *fiber.Ctx) error {
 	var input struct {
-		Email string `json:"email"`
+		Email string `json:"email" validate:"required,email"`
 	}
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	err := h.service.ResendOTP(input.Email)
+	// 🚀 แก้ไข: เพิ่ม c.UserContext()
+	err := h.service.ResendOTP(c.UserContext(), input.Email)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(429).JSON(fiber.Map{"error": err.Error()}) // เปลี่ยนเป็น 429 Too Many Requests ให้สมจริง
 	}
 
 	return c.JSON(fiber.Map{"message": "ส่งรหัส OTP ใหม่ไปที่อีเมลของคุณแล้ว"})
@@ -316,21 +294,20 @@ func (h *UserHandler) ResendOTP(c *fiber.Ctx) error {
 // ==========================================
 func (h *UserHandler) ForgotPassword(c *fiber.Ctx) error {
 	var input struct {
-		Email string `json:"email" validate:"required,email"` // ถ้าใช้ validator ก็ใส่ tag ไว้ได้เลยครับ
+		Email string `json:"email" validate:"required,email"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
 	}
 
-	err := h.service.ForgotPassword(input.Email)
+	// 🚀 แก้ไข: เพิ่ม c.UserContext()
+	err := h.service.ForgotPassword(c.UserContext(), input.Email)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(429).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "ส่งรหัส OTP สำหรับตั้งรหัสผ่านใหม่ ไปที่อีเมลของคุณแล้ว",
-	})
+	return c.JSON(fiber.Map{"message": "ส่งรหัส OTP สำหรับตั้งรหัสผ่านใหม่ ไปที่อีเมลของคุณแล้ว"})
 }
 
 // 7.1 ขอส่งรหัส OTP สำหรับรีเซ็ตรหัสผ่านซ้ำ (Resend Reset OTP)
@@ -347,13 +324,12 @@ func (h *UserHandler) ResendResetOTP(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้องตามรูปแบบ"})
 	}
 
-	if err := h.service.ResendResetOTP(input.Email); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	// 🚀 แก้ไข: เพิ่ม c.UserContext()
+	if err := h.service.ResendResetOTP(c.UserContext(), input.Email); err != nil {
+		return c.Status(429).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "ส่งรหัส OTP สำหรับรีเซ็ตรหัสผ่านใหม่ไปที่อีเมลของคุณแล้ว",
-	})
+	return c.JSON(fiber.Map{"message": "ส่งรหัส OTP สำหรับรีเซ็ตรหัสผ่านใหม่ไปที่อีเมลของคุณแล้ว"})
 }
 
 // ==========================================
@@ -374,23 +350,36 @@ func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้องตามรูปแบบ"})
 	}
 
-	// ✅ ตรวจสอบความปลอดภัยรหัสผ่านใหม่
 	if !isComplexPassword(input.NewPassword) {
 		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านใหม่ต้องมีตัวพิมพ์ใหญ่, ตัวเล็ก, ตัวเลข และสัญลักษณ์"})
 	}
 
-	if err := h.service.ResetPassword(input.Email, input.OTP, input.NewPassword); err != nil {
+	// 🚀 แก้ไข: เพิ่ม c.UserContext()
+	if err := h.service.ResetPassword(c.UserContext(), input.Email, input.OTP, input.NewPassword); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "รีเซ็ตรหัสผ่านสำเร็จ! คุณสามารถเข้าสู่ระบบด้วยรหัสผ่านใหม่ได้ทันที",
-	})
+	return c.JSON(fiber.Map{"message": "รีเซ็ตรหัสผ่านสำเร็จ! คุณสามารถเข้าสู่ระบบด้วยรหัสผ่านใหม่ได้ทันที"})
 }
-
 func isComplexPassword(pass string) bool {
 	return regexLower.MatchString(pass) &&
 		regexUpper.MatchString(pass) &&
 		regexNumber.MatchString(pass) &&
 		regexSpecial.MatchString(pass)
+}
+
+// ผมเพิ่มฟังก์ชันนี้ให้ครับ จะได้ไม่ต้องเขียนเคลียร์คุกกี้ซ้ำๆ
+func (h *UserHandler) clearAuthCookies(c *fiber.Ctx) {
+	c.Cookie(&fiber.Cookie{
+		Name:     "access_token",
+		Value:    "",
+		Expires:  time.Now().Add(-1 * time.Hour),
+		HTTPOnly: true,
+	})
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Expires:  time.Now().Add(-1 * time.Hour),
+		HTTPOnly: true,
+	})
 }

@@ -12,8 +12,8 @@ func setupRoutes(app *fiber.App, h *HandlersContainer) {
 	api := app.Group("/api")
 
 	authLimiter := limiter.New(limiter.Config{
-		Max:        3,
-		Expiration: 5 * time.Minute,
+		Max:        10,
+		Expiration: 1 * time.Minute,
 		LimitReached: func(c *fiber.Ctx) error {
 			return c.Status(429).JSON(fiber.Map{
 				"error": "คุณทำรายการบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่",
