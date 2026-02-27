@@ -19,3 +19,4 @@ Thumbs.db
 
 # Environment variables (ไฟล์เก็บรหัสผ่านหรือตั้งค่าระบบ ห้ามหลุดขึ้น Git เด็ดขาด!)
 .env
+.cursorrules

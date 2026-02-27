@@ -21,7 +21,7 @@ func SeedAdmin(userService domain.UserService, userRepo domain.UserRepository) {
 	}
 
 	// เช็คก่อนว่ามีแล้วไหม
-	existing, _ := userRepo.GetByUsername(username)
+	existing, _ := userRepo.GetByUsername(context.Background(), username)
 	if existing != nil {
 		return
 	}

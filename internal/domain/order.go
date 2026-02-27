@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"context" // 👈 เพิ่ม context
+	"time"
+)
 
 type OrderStatus string
 
@@ -25,37 +28,28 @@ type Order struct {
 type OrderItem struct {
 	ID        uint    `db:"id" json:"id"`
 	OrderID   uint    `db:"order_id" json:"order_id"`
-	VariantID uint    `db:"variant_id" json:"variant_id"` // 👈 เปลี่ยนเป็น VariantID
+	VariantID uint    `db:"variant_id" json:"variant_id"`
 	Quantity  int     `db:"quantity" json:"quantity"`
 	UnitPrice float64 `db:"unit_price" json:"unit_price"`
 	Total     float64 `db:"total" json:"total"`
 
-	// 💡 เอาไว้โชว์ข้อมูลตอนลูกค้าเรียกดูประวัติการสั่งซื้อ (Order History)
 	Variant *ProductVariant `db:"-" json:"variant,omitempty"`
 	Product *Product        `db:"-" json:"product,omitempty"`
 }
 
-// ----------------------------------------------------
-// Interfaces
-// ----------------------------------------------------
-
 type OrderRepository interface {
-	// 👈 เปลี่ยนพารามิเตอร์: รับ CartItems เข้ามาแทน เพื่อเอาไปสร้าง Order
-	CreateOrderFromCart(userID uint, cartItems []CartItem, totalAmount float64) (*Order, error)
-
-	GetByID(id uint) (*Order, error)
-	GetByUserID(userID uint) ([]Order, error)
-	UpdateStatus(id uint, status OrderStatus) error
-	CancelAndRestoreStock(orderID uint) error
+	CreateOrderFromCart(ctx context.Context, userID uint, cartItems []CartItem, totalAmount float64) (*Order, error)
+	GetByID(ctx context.Context, id uint) (*Order, error)
+	GetByUserID(ctx context.Context, userID uint) ([]Order, error)
+	UpdateStatus(ctx context.Context, id uint, status OrderStatus) error
+	CancelAndRestoreStock(ctx context.Context, orderID uint) error
 }
 
 type OrderService interface {
-	// 👈 เปลี่ยนพารามิเตอร์: ฟังก์ชัน Checkout ต้องการแค่ UserID เท่านั้น!
-	Checkout(userID uint) error
-
-	GetByUserID(userID uint) ([]Order, error)
-	GetByID(id uint) (*Order, error)
-	GetByIDForUser(userID uint, orderID uint) (*Order, error)
-	CancelOrder(userID uint, orderID uint) error
-	AdminUpdateStatus(orderID uint, status OrderStatus) error
+	Checkout(ctx context.Context, userID uint) error
+	GetByUserID(ctx context.Context, userID uint) ([]Order, error)
+	GetByID(ctx context.Context, id uint) (*Order, error)
+	GetByIDForUser(ctx context.Context, userID uint, orderID uint) (*Order, error)
+	CancelOrder(ctx context.Context, userID uint, orderID uint) error
+	AdminUpdateStatus(ctx context.Context, orderID uint, status OrderStatus) error
 }

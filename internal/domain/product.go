@@ -1,9 +1,10 @@
 package domain
 
 import (
+	"context" // 👈 เพิ่ม context
 	"time"
 
-	"simple-clothes-shop/pkg/datatype" // 👈 Import เครื่องมือของเราเข้ามา
+	"simple-clothes-shop/pkg/datatype"
 )
 
 type Product struct {
@@ -13,7 +14,7 @@ type Product struct {
 	Price       float64                  `db:"price" json:"price"`
 	Stock       int                      `db:"stock" json:"stock"`
 	CategoryID  uint                     `db:"category_id" json:"category_id"`
-	Images      datatype.JSONStringArray `db:"images" json:"images"` // 👈 ใช้ Type จาก pkg
+	Images      datatype.JSONStringArray `db:"images" json:"images"`
 	CreatedAt   time.Time                `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time                `db:"updated_at" json:"updated_at"`
 
@@ -27,33 +28,29 @@ type ProductVariant struct {
 	SKU        string                  `db:"sku" json:"sku"`
 	Price      float64                 `db:"price" json:"price"`
 	Stock      int                     `db:"stock" json:"stock"`
-	Attributes datatype.JSONAttributes `db:"attributes" json:"attributes"` // 👈 ใช้ Type จาก pkg
+	Attributes datatype.JSONAttributes `db:"attributes" json:"attributes"`
 	CreatedAt  time.Time               `db:"created_at" json:"created_at"`
 	UpdatedAt  time.Time               `db:"updated_at" json:"updated_at"`
 }
 
-// ==========================================
-// 2. Repository Interface (สัญญาจ้างฝ่ายเก็บของ)
-// ==========================================
-// ใครที่จะมาทำหน้าที่คุยกับ DB ต้องมีฟังก์ชันตามนี้เป๊ะๆ ห้ามขาด ห้ามเกิน
 type ProductRepository interface {
-	GetAll() ([]Product, error)
-	GetByID(id uint) (*Product, error)
-	GetByCategoryID(categoryID uint) ([]Product, error)
-	GetWithFilter(categoryID *uint, minPrice *float64, maxPrice *float64, limit int, offset int) ([]Product, error)
-	Create(product *Product) error
-	Update(id uint, product *Product) error
-	Delete(id uint) error
-	DeleteVariant(id uint) error
+	GetAll(ctx context.Context) ([]Product, error)
+	GetByID(ctx context.Context, id uint) (*Product, error)
+	GetByCategoryID(ctx context.Context, categoryID uint) ([]Product, error)
+	GetWithFilter(ctx context.Context, categoryID *uint, minPrice *float64, maxPrice *float64, limit int, offset int) ([]Product, error)
+	Create(ctx context.Context, product *Product) error
+	Update(ctx context.Context, id uint, product *Product) error
+	Delete(ctx context.Context, id uint) error
+	DeleteVariant(ctx context.Context, id uint) error
 }
 
 type ProductService interface {
-	FetchAll() ([]Product, error)
-	FetchByID(id uint) (*Product, error)
-	FetchByCategoryID(categoryID uint) ([]Product, error)
-	FetchWithFilter(categoryID *uint, minPrice *float64, maxPrice *float64, page int, limit int) ([]Product, error)
-	CreateProduct(product *Product) error
-	UpdateProduct(id uint, product *Product) error
-	RemoveProduct(id uint) error
-	RemoveVariant(variantID uint) error
+	FetchAll(ctx context.Context) ([]Product, error)
+	FetchByID(ctx context.Context, id uint) (*Product, error)
+	FetchByCategoryID(ctx context.Context, categoryID uint) ([]Product, error)
+	FetchWithFilter(ctx context.Context, categoryID *uint, minPrice *float64, maxPrice *float64, page int, limit int) ([]Product, error)
+	CreateProduct(ctx context.Context, product *Product) error
+	UpdateProduct(ctx context.Context, id uint, product *Product) error
+	RemoveProduct(ctx context.Context, id uint) error
+	RemoveVariant(ctx context.Context, variantID uint) error
 }

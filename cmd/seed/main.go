@@ -1,12 +1,13 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
+	"encoding/json" // 👈 ต้องใช้สำหรับแปลง JSON
 	"fmt"
-	"io"
+	"io" // 👈 ต้องใช้สำหรับอ่านข้อมูลจาก API
 	"log"
 	"math/rand"
-	"net/http"
+	"net/http" // 👈 ต้องใช้สำหรับยิง API
 	"strings"
 	"time"
 
@@ -15,23 +16,18 @@ import (
 	"simple-clothes-shop/internal/service"
 	"simple-clothes-shop/pkg/database"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jmoiron/sqlx" // 👈 ต้องใช้สำหรับ *sqlx.DB
 	"github.com/joho/godotenv"
 )
 
-// --- Structs สำหรับรับข้อมูลจาก Platzi ---
-type PlatziCategory struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-}
-
-type PlatziProduct struct {
-	ID          int            `json:"id"`
-	Title       string         `json:"title"`
-	Price       float64        `json:"price"`
-	Description string         `json:"description"`
-	Category    PlatziCategory `json:"category"`
-	Images      []string       `json:"images"`
+// --- Structs สำหรับรับข้อมูลจาก FakeStore API ---
+type FakeStoreProduct struct {
+	ID          int     `json:"id"`
+	Title       string  `json:"title"`
+	Price       float64 `json:"price"`
+	Description string  `json:"description"`
+	Category    string  `json:"category"`
+	Image       string  `json:"image"`
 }
 
 func main() {
@@ -54,10 +50,10 @@ func main() {
 	log.Println("...กำลังทำความสะอาดตาราง (Truncate)")
 	_, _ = db.Exec("TRUNCATE TABLE categories, products, product_variants, cart_items, carts, order_items, orders RESTART IDENTITY CASCADE")
 
-	// 📦 2. สร้าง Categories หลักแบบ Manual (ป้องกันข้อมูลขยะจาก API)
+	// 📦 2. สร้าง Categories หลักแบบ Manual
 	seedCleanCategories(categoryService)
 
-	// 👕 3. ดึงสินค้าจาก API แล้วจับคู่หมวดหมู่ให้ถูกต้อง
+	// 👕 3. ดึงสินค้าจาก API
 	seedProductsAndVariants(db)
 
 	log.Println("✅ กระบวนการ Seed ข้อมูลเสร็จสมบูรณ์!")
@@ -75,7 +71,7 @@ func seedCleanCategories(svc domain.CategoryService) {
 	}
 
 	for _, name := range coreCategories {
-		err := svc.CreateCategory(name)
+		err := svc.CreateCategory(context.Background(), name)
 		if err != nil {
 			log.Printf("❌ สร้างหมวดหมู่ '%s' ไม่สำเร็จ: %v\n", name, err)
 		} else {
@@ -84,11 +80,11 @@ func seedCleanCategories(svc domain.CategoryService) {
 	}
 }
 
+// 👇 นี่คือฟังก์ชันที่หายไปจากไฟล์ของคุณครับ! เอามาต่อไว้ล่างสุดแล้ว
 func seedProductsAndVariants(db *sqlx.DB) {
-	log.Println("...กำลังดึงข้อมูล Products จาก Platzi API")
+	log.Println("...กำลังดึงข้อมูลจาก FakeStore API (Stable Version)")
 
-	// ดึงสินค้ามา 40 ชิ้น
-	resp, err := http.Get("https://api.escuelajs.co/api/v1/products?limit=40&offset=0")
+	resp, err := http.Get("https://fakestoreapi.com/products")
 	if err != nil {
 		log.Fatalf("ดึงข้อมูล Products ไม่สำเร็จ: %v", err)
 	}
@@ -99,43 +95,36 @@ func seedProductsAndVariants(db *sqlx.DB) {
 		log.Fatalf("อ่านข้อมูล Body ไม่สำเร็จ: %v", err)
 	}
 
-	var platziProducts []PlatziProduct
-	if err := json.Unmarshal(body, &platziProducts); err != nil {
+	var fakeProducts []FakeStoreProduct
+	if err := json.Unmarshal(body, &fakeProducts); err != nil {
 		log.Fatalf("แปลง JSON ไม่สำเร็จ: %v", err)
 	}
+
+	log.Printf("📥 โหลดสินค้ามาได้ %d ชิ้น... เริ่มนำเข้าฐานข้อมูล\n", len(fakeProducts))
 
 	colors := []string{"Red", "Blue", "Black", "White", "Green", "Grey"}
 	sizes := []string{"S", "M", "L", "XL"}
 
 	successCount := 0
-	for _, p := range platziProducts {
-
-		// 🧠 ระบบจับคู่หมวดหมู่อัจฉริยะ (Smart Category Mapping)
-		// ไม่สนใจว่าจะสะกด Electronic หรือ Electronics เราจะจับยัดให้ถูกหมวด
-		mappedCategory := "Miscellaneous" // ค่าเริ่มต้น
-		lowerCatName := strings.ToLower(p.Category.Name)
-
-		if strings.Contains(lowerCatName, "elect") {
-			mappedCategory = "Electronics"
-		} else if strings.Contains(lowerCatName, "cloth") || strings.Contains(lowerCatName, "shirt") {
+	for _, p := range fakeProducts {
+		mappedCategory := "Miscellaneous"
+		if p.Category == "men's clothing" || p.Category == "women's clothing" {
 			mappedCategory = "Clothes"
-		} else if strings.Contains(lowerCatName, "shoe") {
-			mappedCategory = "Shoes"
-		} else if strings.Contains(lowerCatName, "furni") {
-			mappedCategory = "Furniture"
+		} else if p.Category == "electronics" {
+			mappedCategory = "Electronics"
+		} else if p.Category == "jewelery" {
+			mappedCategory = "Miscellaneous"
 		}
 
-		// ดึง ID หมวดหมู่จากฐานข้อมูล
 		var localCategoryID uint
 		err := db.Get(&localCategoryID, "SELECT id FROM categories WHERE name=$1", mappedCategory)
 		if err != nil {
-			log.Printf("⚠️ ข้ามสินค้า '%s' (เกิดข้อผิดพลาดในการดึง ID หมวดหมู่)\n", p.Title)
 			continue
 		}
 
 		var newProductID uint
 		randomStock := rand.Intn(100) + 10
-		imagesJSON, _ := json.Marshal(p.Images)
+		imagesJSON, _ := json.Marshal([]string{p.Image})
 
 		err = db.QueryRow(`
 			INSERT INTO products (name, description, price, stock, category_id, images)
@@ -169,7 +158,7 @@ func seedProductsAndVariants(db *sqlx.DB) {
 			`, newProductID, sku, attributesJSON, variantPrice, variantStock)
 
 			if vErr != nil {
-				log.Printf("   ⚠️ สร้าง Variant (%s) ไม่สำเร็จ: %v\n", sku, vErr)
+				// ข้ามเงียบๆ ถ้า error
 			}
 		}
 

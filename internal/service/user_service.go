@@ -34,11 +34,8 @@ func NewUserService(userRepo domain.UserRepository, cacheRepo repository.CacheRe
 	}
 }
 
-// ==========================================
-// 1. ลงทะเบียน (Register)
-// ==========================================
 func (s *userService) Register(ctx context.Context, user *domain.User) error {
-	existing, _ := s.userRepo.GetByUsername(user.Username)
+	existing, _ := s.userRepo.GetByUsername(ctx, user.Username)
 	if existing != nil {
 		return errors.New("username already exists")
 	}
@@ -52,25 +49,20 @@ func (s *userService) Register(ctx context.Context, user *domain.User) error {
 		return err
 	}
 	user.Password = string(hashedPassword)
-	user.IsVerified = false // 👈 ไม่ต้องเซ็ตค่า OTP ลง Struct นี้แล้ว เพราะเราจะเก็บใน Redis
+	user.IsVerified = false
 
-	// 1. บันทึกลง PostgreSQL (ข้อมูลถาวร)
-	err = s.userRepo.Create(user)
+	err = s.userRepo.Create(ctx, user)
 	if err != nil {
 		return err
 	}
 
-	// 2. ถ้ามีอีเมล ให้สร้าง OTP และเก็บลง Redis (ข้อมูลชั่วคราว)
 	if user.Email != "" {
 		otp := generateOTP()
-
-		// 🚀 โยนให้ Redis จัดการ Rate Limit และวันหมดอายุ
 		err = s.cacheRepo.SaveOTP(ctx, user.Email, otp)
 		if err != nil {
-			return err // กรณีที่ผู้ใช้สมัครรัวๆ Redis จะเตะกลับตรงนี้
+			return err
 		}
 
-		// 3. ภารกิจส่งอีเมล (Safe Goroutine)
 		go func(targetEmail string, targetOTP string) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -85,9 +77,9 @@ func (s *userService) Register(ctx context.Context, user *domain.User) error {
 }
 
 func (s *userService) Login(ctx context.Context, username, password string) (string, string, string, error) {
-	user, err := s.userRepo.GetByUsername(username)
+	user, err := s.userRepo.GetByUsername(ctx, username)
 	if err != nil {
-		return "", "", "", errors.New("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง") // 🛡️ เปลี่ยน Error ให้คลุมเครือ กันการเดา Username
+		return "", "", "", errors.New("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง")
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
@@ -95,7 +87,6 @@ func (s *userService) Login(ctx context.Context, username, password string) (str
 		return "", "", "", errors.New("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง")
 	}
 
-	// สร้าง Access Token (15 นาที)
 	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": user.ID,
 		"role":    user.Role,
@@ -106,7 +97,6 @@ func (s *userService) Login(ctx context.Context, username, password string) (str
 		return "", "", "", err
 	}
 
-	// สร้าง Refresh Token (7 วัน)
 	refreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": user.ID,
 		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
@@ -116,7 +106,6 @@ func (s *userService) Login(ctx context.Context, username, password string) (str
 		return "", "", "", err
 	}
 
-	// 🚀 บันทึก Session ลง Redis (ลบตัวเองทิ้งเมื่อครบ 7 วัน)
 	err = s.cacheRepo.SaveSession(ctx, refreshToken, user.ID, 7*24*time.Hour)
 	if err != nil {
 		return "", "", "", errors.New("ไม่สามารถสร้างเซสชันได้")
@@ -125,15 +114,15 @@ func (s *userService) Login(ctx context.Context, username, password string) (str
 	return accessToken, refreshToken, string(user.Role), nil
 }
 
-func (s *userService) GetAllUsers(requesterRole domain.Role) ([]*domain.User, error) {
+func (s *userService) GetAllUsers(ctx context.Context, requesterRole domain.Role) ([]*domain.User, error) {
 	if requesterRole != domain.RoleAdmin {
 		return nil, errors.New("forbidden: สิทธิ์การเข้าถึงถูกปฏิเสธ เฉพาะผู้ดูแลระบบเท่านั้น")
 	}
-	return s.userRepo.GetAll()
+	return s.userRepo.GetAll(ctx)
 }
 
-func (s *userService) UpdateUser(requesterID uint, requesterRole domain.Role, targetID uint, input *domain.User) error {
-	current, err := s.userRepo.GetByID(targetID)
+func (s *userService) UpdateUser(ctx context.Context, requesterID uint, requesterRole domain.Role, targetID uint, input *domain.User) error {
+	current, err := s.userRepo.GetByID(ctx, targetID)
 	if err != nil {
 		return errors.New("ไม่พบข้อมูลผู้ใช้งานนี้ในระบบ")
 	}
@@ -155,43 +144,32 @@ func (s *userService) UpdateUser(requesterID uint, requesterRole domain.Role, ta
 		}
 	}
 
-	return s.userRepo.Update(targetID, current)
+	return s.userRepo.Update(ctx, targetID, current)
 }
 
-func (s *userService) GetUser(requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
+func (s *userService) GetUser(ctx context.Context, requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
 	if requesterRole != "admin" && requesterID != targetID {
 		return nil, errors.New("forbidden")
 	}
-
-	return s.userRepo.GetByID(targetID)
+	return s.userRepo.GetByID(ctx, targetID)
 }
 
-// ==========================================
-// 5. ต่ออายุ Access Token (Refresh Token)
-// ==========================================
-// ==========================================
-// 5. ต่ออายุ Access Token (Refresh Token)
-// ==========================================
 func (s *userService) RefreshAccessToken(ctx context.Context, refreshToken string) (string, string, error) {
-	// 1. ตรวจสอบว่า Refresh Token นี้มีอยู่ใน Redis หรือไม่
-	// (สมมติว่าคุณเพิ่มฟังก์ชัน GetSession ใน CacheRepository แล้ว)
 	userIDStr, err := s.cacheRepo.GetSession(ctx, refreshToken)
 	if err != nil {
 		return "", "", errors.New("unauthorized: เซสชันไม่ถูกต้อง หรือหมดอายุแล้ว")
 	}
 
-	// แปลง userIDStr กลับเป็น uint
 	userID, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil {
 		return "", "", errors.New("unauthorized: ข้อมูลเซสชันผิดพลาด")
 	}
 
-	user, err := s.userRepo.GetByID(uint(userID))
+	user, err := s.userRepo.GetByID(ctx, uint(userID))
 	if err != nil {
 		return "", "", errors.New("unauthorized: ไม่พบข้อมูลผู้ใช้งาน")
 	}
 
-	// 2. สร้าง Access Token ใบใหม่ (15 นาที)
 	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": user.ID,
 		"role":    user.Role,
@@ -202,21 +180,17 @@ func (s *userService) RefreshAccessToken(ctx context.Context, refreshToken strin
 		return "", "", err
 	}
 
-	// 3. สร้าง Refresh Token ใบใหม่! (ยืดอายุไปอีก 7 วันนับจากวันนี้)
 	newExpiresAt := time.Now().Add(7 * 24 * time.Hour)
 	refreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": user.ID,
 		"exp":     newExpiresAt.Unix(),
 	})
-	newRefreshToken, err := refreshTokenObj.SignedString([]byte(s.jwtRefreshSecret)) // 👈 แก้ตรงนี้ให้ใช้ตัวแปร struct
+	newRefreshToken, err := refreshTokenObj.SignedString([]byte(s.jwtRefreshSecret))
 	if err != nil {
 		return "", "", err
 	}
 
-	// 4. สั่ง Redis สลับ Token ทันที
-	// - ลบ Token เก่าทิ้ง
 	_ = s.cacheRepo.RevokeSession(ctx, refreshToken)
-	// - สร้าง Token ใหม่
 	err = s.cacheRepo.SaveSession(ctx, newRefreshToken, user.ID, 7*24*time.Hour)
 	if err != nil {
 		return "", "", errors.New("ไม่สามารถอัปเดตเซสชันได้")
@@ -225,26 +199,16 @@ func (s *userService) RefreshAccessToken(ctx context.Context, refreshToken strin
 	return newAccessToken, newRefreshToken, nil
 }
 
-// ==========================================
-// 6. ออกจากระบบ (Logout)
-// ==========================================
 func (s *userService) Logout(ctx context.Context, refreshToken string) error {
-	// 🚀 ลบ Key ออกจาก Redis (Revoke Session อย่างสมบูรณ์แบบและรวดเร็ว)
 	return s.cacheRepo.RevokeSession(ctx, refreshToken)
 }
 
-// ==========================================
-// 8. สร้างเลขสุ่ม 6 หลัก
-// ==========================================
 func generateOTP() string {
 	return fmt.Sprintf("%06d", rand.Intn(900000)+100000)
 }
 
-// ==========================================
-// ยืนยันรหัส OTP จากอีเมล
-// ==========================================
 func (s *userService) VerifyEmail(ctx context.Context, email string, otp string) error {
-	user, err := s.userRepo.GetByEmail(email)
+	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		return errors.New("ไม่พบอีเมลนี้ในระบบ")
 	}
@@ -253,29 +217,24 @@ func (s *userService) VerifyEmail(ctx context.Context, email string, otp string)
 		return errors.New("บัญชีนี้ได้รับการยืนยันไปแล้ว")
 	}
 
-	// 🚀 ให้ Redis ตรวจสอบ OTP (เช็คเวลาหมดอายุ + ดักจับ Brute-force 3 ครั้ง)
 	err = s.cacheRepo.VerifyOTP(ctx, email, otp)
 	if err != nil {
-		return err // จะคืนค่า error จาก Redis เช่น "รหัสผิด", "หมดอายุ", หรือ "ทายผิดเกินบล็อก"
+		return err
 	}
 
-	// อัปเดต PostgreSQL ว่ายืนยันแล้ว
-	return s.userRepo.UpdateVerificationStatus(user.ID)
+	return s.userRepo.UpdateVerificationStatus(ctx, user.ID)
 }
 
 func (s *userService) ResendOTP(ctx context.Context, email string) error {
-	user, err := s.userRepo.GetByEmail(email)
+	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		return errors.New("ไม่พบอีเมลนี้ในระบบ")
 	}
 
 	newOTP := generateOTP()
-
-	// 🚀 Redis ตรวจสอบ Cooldown (60 วิ) และ Max Resend ให้อัตโนมัติ!
-	// (ลอจิกเช็คเวลาเดิมๆ ที่รกๆ ลบทิ้งไปได้เลย)
 	err = s.cacheRepo.SaveOTP(ctx, email, newOTP)
 	if err != nil {
-		return err // ถ้าติด Cooldown หรือเกิน Limit Redis จะส่ง Error กลับมาเอง
+		return err
 	}
 
 	go func() {
@@ -285,13 +244,11 @@ func (s *userService) ResendOTP(ctx context.Context, email string) error {
 	return nil
 }
 
-// 1. ฟังก์ชันขอรีเซ็ตรหัสผ่าน
 func (s *userService) ForgotPassword(ctx context.Context, email string) error {
-	user, err := s.userRepo.GetByEmail(email)
+	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		// 🛡️ [Security] ไม่บอกว่า "ไม่พบอีเมล" เพื่อป้องกันแฮกเกอร์สุ่มหาอีเมลผู้ใช้งาน
 		fmt.Println("⚠️ พยายามขอรีเซ็ตรหัสผ่านแต่อีเมลไม่มีในระบบ:", email)
-		return nil // 👈 ตอบว่าสำเร็จ (แต่จริงๆ ไม่ได้ส่งอะไร)
+		return nil
 	}
 
 	otp := generateOTP()
@@ -311,14 +268,12 @@ func (s *userService) ForgotPassword(ctx context.Context, email string) error {
 	return nil
 }
 
-// 2. ฟังก์ชันตั้งรหัสผ่านใหม่
 func (s *userService) ResetPassword(ctx context.Context, email, otp, newPassword string) error {
-	user, err := s.userRepo.GetByEmail(email)
+	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		return errors.New("คำขอไม่ถูกต้อง") // 🛡️ คลุมเครือไว้ก่อน
+		return errors.New("คำขอไม่ถูกต้อง")
 	}
 
-	// 🚀 ให้ Redis ยืนยัน OTP ป้องกันการสุ่มเดารหัสแบบ Brute-force
 	err = s.cacheRepo.VerifyOTP(ctx, email, otp)
 	if err != nil {
 		return err
@@ -329,22 +284,19 @@ func (s *userService) ResetPassword(ctx context.Context, email, otp, newPassword
 		return err
 	}
 
-	return s.userRepo.UpdatePassword(user.ID, string(hashedPassword))
+	return s.userRepo.UpdatePassword(ctx, user.ID, string(hashedPassword))
 }
 
-// 3. ฟังก์ชันขอส่ง OTP สำหรับรีเซ็ตรหัสผ่านซ้ำ (Resend Reset OTP)
 func (s *userService) ResendResetOTP(ctx context.Context, email string) error {
-	user, err := s.userRepo.GetByEmail(email)
+	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		return errors.New("ไม่พบอีเมลนี้ในระบบ")
 	}
 
 	newOTP := generateOTP()
-
-	// 🚀 โยนให้ Redis ตรวจสอบ Cooldown และ Limit อัตโนมัติ
 	err = s.cacheRepo.SaveOTP(ctx, email, newOTP)
 	if err != nil {
-		return err // เตะกลับถ้าติด Cooldown หรือเกินโควต้า
+		return err
 	}
 
 	go func() {

@@ -1,13 +1,14 @@
 package service
 
 import (
+	"context" // 👈 เพิ่ม context
 	"errors"
 	"simple-clothes-shop/internal/domain"
 )
 
 type orderService struct {
 	repo     domain.OrderRepository
-	cartRepo domain.CartRepository // 👈 เปลี่ยนมาใช้ CartRepo แทน ProductRepo
+	cartRepo domain.CartRepository
 }
 
 func NewOrderService(repo domain.OrderRepository, cartRepo domain.CartRepository) domain.OrderService {
@@ -17,18 +18,13 @@ func NewOrderService(repo domain.OrderRepository, cartRepo domain.CartRepository
 	}
 }
 
-// =================================================================
-// 🛒 1. ฟังก์ชัน Checkout (ดึงของจากตะกร้ามาคิดเงิน)
-// =================================================================
-func (s *orderService) Checkout(userID uint) error {
-	// 1. หาตะกร้าของลูกค้าคนนี้
-	cart, err := s.cartRepo.GetCartByUserID(userID)
+func (s *orderService) Checkout(ctx context.Context, userID uint) error {
+	cart, err := s.cartRepo.GetCartByUserID(ctx, userID) // 👈 ส่ง ctx ต่อ
 	if err != nil || cart == nil {
 		return errors.New("ไม่พบตะกร้าสินค้า")
 	}
 
-	// 2. กวาดของในตะกร้ามาดู
-	items, err := s.cartRepo.GetCartItemsWithDetails(cart.ID)
+	items, err := s.cartRepo.GetCartItemsWithDetails(ctx, cart.ID) // 👈 ส่ง ctx ต่อ
 	if err != nil {
 		return errors.New("เกิดข้อผิดพลาดในการดึงรายการสินค้า")
 	}
@@ -37,31 +33,25 @@ func (s *orderService) Checkout(userID uint) error {
 		return errors.New("ตะกร้าสินค้าว่างเปล่า ไม่สามารถสั่งซื้อได้")
 	}
 
-	// 3. คำนวณยอดรวมทั้งหมด (Total Amount)
 	var totalAmount float64
 	for _, item := range items {
 		totalAmount += item.Variant.Price * float64(item.Quantity)
 	}
 
-	// 4. ส่งไม้ต่อให้ Repo จัดการตัดสต็อก สร้างบิล และล้างตะกร้าแบบ 4-in-1!
-	_, err = s.repo.CreateOrderFromCart(userID, items, totalAmount)
+	_, err = s.repo.CreateOrderFromCart(ctx, userID, items, totalAmount) // 👈 ส่ง ctx ต่อ
 	return err
 }
 
-// =================================================================
-// ฟังก์ชันอื่นๆ (เหมือนเดิมเป๊ะ แค่จัดให้เป็นระเบียบ)
-// =================================================================
-
-func (s *orderService) GetByUserID(userID uint) ([]domain.Order, error) {
-	return s.repo.GetByUserID(userID)
+func (s *orderService) GetByUserID(ctx context.Context, userID uint) ([]domain.Order, error) {
+	return s.repo.GetByUserID(ctx, userID)
 }
 
-func (s *orderService) GetByID(id uint) (*domain.Order, error) {
-	return s.repo.GetByID(id)
+func (s *orderService) GetByID(ctx context.Context, id uint) (*domain.Order, error) {
+	return s.repo.GetByID(ctx, id)
 }
 
-func (s *orderService) GetByIDForUser(userID uint, orderID uint) (*domain.Order, error) {
-	order, err := s.repo.GetByID(orderID)
+func (s *orderService) GetByIDForUser(ctx context.Context, userID uint, orderID uint) (*domain.Order, error) {
+	order, err := s.repo.GetByID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -71,8 +61,8 @@ func (s *orderService) GetByIDForUser(userID uint, orderID uint) (*domain.Order,
 	return order, nil
 }
 
-func (s *orderService) CancelOrder(userID uint, orderID uint) error {
-	order, err := s.repo.GetByID(orderID)
+func (s *orderService) CancelOrder(ctx context.Context, userID uint, orderID uint) error {
+	order, err := s.repo.GetByID(ctx, orderID)
 	if err != nil {
 		return err
 	}
@@ -82,11 +72,11 @@ func (s *orderService) CancelOrder(userID uint, orderID uint) error {
 	if order.Status != domain.StatusPending {
 		return errors.New("สามารถยกเลิกได้เฉพาะคำสั่งซื้อที่อยู่ในสถานะ pending เท่านั้น")
 	}
-	return s.repo.CancelAndRestoreStock(orderID)
+	return s.repo.CancelAndRestoreStock(ctx, orderID)
 }
 
-func (s *orderService) AdminUpdateStatus(orderID uint, newStatus domain.OrderStatus) error {
-	order, err := s.repo.GetByID(orderID)
+func (s *orderService) AdminUpdateStatus(ctx context.Context, orderID uint, newStatus domain.OrderStatus) error {
+	order, err := s.repo.GetByID(ctx, orderID)
 	if err != nil {
 		return err
 	}
@@ -107,5 +97,5 @@ func (s *orderService) AdminUpdateStatus(orderID uint, newStatus domain.OrderSta
 			return errors.New("คำสั่งซื้อที่ชำระเงินแล้วสามารถเปลี่ยนเป็น shipped เท่านั้น")
 		}
 	}
-	return s.repo.UpdateStatus(orderID, newStatus)
+	return s.repo.UpdateStatus(ctx, orderID, newStatus)
 }

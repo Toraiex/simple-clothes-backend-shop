@@ -15,18 +15,14 @@ func NewOrderHandler(service domain.OrderService) *OrderHandler {
 	return &OrderHandler{service: service}
 }
 
-// =================================================================
-// 🛒 1. [POST] ยืนยันคำสั่งซื้อ (Checkout) จากตะกร้า
-// =================================================================
 func (h *OrderHandler) Checkout(c *fiber.Ctx) error {
-	// ดึง ID จาก Middleware (แบบเดียวกับที่เราทำใน Cart)
 	userID, ok := c.Locals("user_id").(uint)
 	if !ok {
 		return c.Status(401).JSON(fiber.Map{"error": "กรุณาเข้าสู่ระบบ"})
 	}
 
-	// สั่ง Checkout ได้เลย! (ไม่ต้องรับ Body JSON อะไรทั้งนั้น หน้าบ้านยิง POST เปล่าๆ มาได้เลย)
-	if err := h.service.Checkout(userID); err != nil {
+	// 🚀 แทรก c.UserContext()
+	if err := h.service.Checkout(c.UserContext(), userID); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -35,9 +31,6 @@ func (h *OrderHandler) Checkout(c *fiber.Ctx) error {
 	})
 }
 
-// =================================================================
-// 2. [GET] ดูรายละเอียดบิล
-// =================================================================
 func (h *OrderHandler) GetByID(c *fiber.Ctx) error {
 	idParam, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -51,10 +44,11 @@ func (h *OrderHandler) GetByID(c *fiber.Ctx) error {
 	}
 
 	var order *domain.Order
+	// 🚀 แทรก c.UserContext()
 	if role == "admin" {
-		order, err = h.service.GetByID(uint(idParam))
+		order, err = h.service.GetByID(c.UserContext(), uint(idParam))
 	} else {
-		order, err = h.service.GetByIDForUser(userID, uint(idParam))
+		order, err = h.service.GetByIDForUser(c.UserContext(), userID, uint(idParam))
 	}
 
 	if err != nil {
@@ -63,25 +57,20 @@ func (h *OrderHandler) GetByID(c *fiber.Ctx) error {
 	return c.JSON(order)
 }
 
-// =================================================================
-// 3. [GET] ดูประวัติการสั่งซื้อของฉัน
-// =================================================================
 func (h *OrderHandler) GetMyOrders(c *fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uint)
 	if !ok {
 		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
-	orders, err := h.service.GetByUserID(userID)
+	// 🚀 แทรก c.UserContext()
+	orders, err := h.service.GetByUserID(c.UserContext(), userID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(orders)
 }
 
-// =================================================================
-// 4. [PUT] ลูกค้ายกเลิกคำสั่งซื้อ
-// =================================================================
 func (h *OrderHandler) Cancel(c *fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uint)
 	if !ok {
@@ -93,15 +82,13 @@ func (h *OrderHandler) Cancel(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ID คำสั่งซื้อไม่ถูกต้อง"})
 	}
 
-	if err := h.service.CancelOrder(userID, uint(orderID)); err != nil {
+	// 🚀 แทรก c.UserContext()
+	if err := h.service.CancelOrder(c.UserContext(), userID, uint(orderID)); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"message": "ยกเลิกคำสั่งซื้อและคืนสต็อกเรียบร้อยแล้ว"})
 }
 
-// =================================================================
-// 5. [PUT] แอดมินอัปเดตสถานะ (Paid, Shipped, ฯลฯ)
-// =================================================================
 func (h *OrderHandler) AdminUpdateStatus(c *fiber.Ctx) error {
 	orderID, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -115,7 +102,8 @@ func (h *OrderHandler) AdminUpdateStatus(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
 	}
 
-	if err := h.service.AdminUpdateStatus(uint(orderID), domain.OrderStatus(input.Status)); err != nil {
+	// 🚀 แทรก c.UserContext()
+	if err := h.service.AdminUpdateStatus(c.UserContext(), uint(orderID), domain.OrderStatus(input.Status)); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"message": "อัปเดตสถานะคำสั่งซื้อเรียบร้อยแล้ว"})

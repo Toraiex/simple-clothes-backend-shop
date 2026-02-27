@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context" // 👈 เพิ่ม context
 	"errors"
 	"simple-clothes-shop/internal/domain"
 
@@ -15,10 +16,10 @@ func NewCategoryRepository(db *sqlx.DB) domain.CategoryRepository {
 	return &categoryRepository{db: db}
 }
 
-func (r *categoryRepository) GetAll() ([]domain.Category, error) {
+func (r *categoryRepository) GetAll(ctx context.Context) ([]domain.Category, error) {
 	var categories []domain.Category
 
-	err := r.db.Select(&categories, `
+	err := r.db.SelectContext(ctx, &categories, `
 		SELECT id, name, created_at, updated_at
 		FROM categories
 		ORDER BY id DESC
@@ -27,10 +28,10 @@ func (r *categoryRepository) GetAll() ([]domain.Category, error) {
 	return categories, err
 }
 
-func (r *categoryRepository) GetByID(id uint) (*domain.Category, error) {
+func (r *categoryRepository) GetByID(ctx context.Context, id uint) (*domain.Category, error) {
 	var category domain.Category
 
-	err := r.db.Get(&category, `
+	err := r.db.GetContext(ctx, &category, `
 		SELECT id, name, created_at, updated_at
 		FROM categories
 		WHERE id=$1
@@ -43,8 +44,8 @@ func (r *categoryRepository) GetByID(id uint) (*domain.Category, error) {
 	return &category, nil
 }
 
-func (r *categoryRepository) Create(category *domain.Category) error {
-	return r.db.QueryRow(`
+func (r *categoryRepository) Create(ctx context.Context, category *domain.Category) error {
+	return r.db.QueryRowContext(ctx, `
 		INSERT INTO categories (name)
 		VALUES ($1)
 		RETURNING id, created_at, updated_at
@@ -53,8 +54,8 @@ func (r *categoryRepository) Create(category *domain.Category) error {
 	).Scan(&category.ID, &category.CreatedAt, &category.UpdatedAt)
 }
 
-func (r *categoryRepository) Update(category *domain.Category) error {
-	_, err := r.db.Exec(`
+func (r *categoryRepository) Update(ctx context.Context, category *domain.Category) error {
+	_, err := r.db.ExecContext(ctx, `
 		UPDATE categories
 		SET name=$1, updated_at=NOW()
 		WHERE id=$2
@@ -66,24 +67,21 @@ func (r *categoryRepository) Update(category *domain.Category) error {
 	return err
 }
 
-func (r *categoryRepository) Delete(id uint) error {
-	// 1. สั่งรันคำสั่งลบ และเก็บผลลัพธ์ (result) ไว้
-	result, err := r.db.Exec(`
+func (r *categoryRepository) Delete(ctx context.Context, id uint) error {
+	result, err := r.db.ExecContext(ctx, `
 		DELETE FROM categories
 		WHERE id=$1
 	`, id)
 
 	if err != nil {
-		return err // Error จาก Database (เช่น เน็ตหลุด, syntax ผิด)
+		return err
 	}
 
-	// 2. ถาม Database ว่า "ตกลงเมื่อกี้ลบไปกี่แถว?"
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
 
-	// 3. ถ้าลบไป 0 แถว แปลว่าไม่เจอ ID นี้ในระบบแต่แรก
 	if rowsAffected == 0 {
 		return errors.New("ไม่พบข้อมูลหมวดหมู่นี้ในระบบ (ลบไม่สำเร็จ)")
 	}

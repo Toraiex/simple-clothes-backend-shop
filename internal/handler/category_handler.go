@@ -17,7 +17,7 @@ func NewCategoryHandler(service domain.CategoryService) *CategoryHandler {
 }
 
 func (h *CategoryHandler) GetAll(c *fiber.Ctx) error {
-	categories, err := h.service.FetchAll()
+	categories, err := h.service.FetchAll(c.UserContext()) // 👈 ใส่ c.UserContext()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -32,8 +32,7 @@ func (h *CategoryHandler) Create(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
 	}
 
-	if err := h.service.CreateCategory(input.Name); err != nil {
-		// ถ้าเป็น Error ที่เราดักไว้ (ชื่อซ้ำ, ค่าว่าง) ให้ตอบ 400 Bad Request
+	if err := h.service.CreateCategory(c.UserContext(), input.Name); err != nil { // 👈 ใส่ c.UserContext()
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -42,7 +41,7 @@ func (h *CategoryHandler) Create(c *fiber.Ctx) error {
 
 func (h *CategoryHandler) GetByID(c *fiber.Ctx) error {
 	id, _ := strconv.Atoi(c.Params("id"))
-	category, err := h.service.GetCategory(uint(id))
+	category, err := h.service.GetCategory(c.UserContext(), uint(id)) // 👈 ใส่ c.UserContext()
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบหมวดหมู่นี้"})
 	}
@@ -63,24 +62,23 @@ func (h *CategoryHandler) Update(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
 	}
 
-	if err := h.service.UpdateCategory(uint(id), input.Name); err != nil {
-		// เช็คถ้าหาไม่เจอให้ตอบ 404
+	if err := h.service.UpdateCategory(c.UserContext(), uint(id), input.Name); err != nil { // 👈 ใส่ c.UserContext()
 		if err.Error() == "ไม่พบหมวดหมู่นี้ในระบบ" {
 			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
 		}
-		// ค่าว่าง หรือ ชื่อซ้ำ ตอบ 400
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{"message": "แก้ไขหมวดหมู่สำเร็จ"})
 }
+
 func (h *CategoryHandler) Delete(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ID หมวดหมู่ไม่ถูกต้อง"})
 	}
 
-	if err := h.service.RemoveCategory(uint(id)); err != nil {
+	if err := h.service.RemoveCategory(c.UserContext(), uint(id)); err != nil { // 👈 ใส่ c.UserContext()
 		if err.Error() == "ไม่พบข้อมูลหมวดหมู่นี้ในระบบ (ลบไม่สำเร็จ)" {
 			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
 		}

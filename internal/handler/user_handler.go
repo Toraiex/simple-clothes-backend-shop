@@ -173,7 +173,8 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 	}
 	requesterRole := domain.Role(roleStr)
 
-	user, err := h.service.GetUser(requesterID, requesterRole, uint(idParam))
+	// 🚀 เพิ่ม c.UserContext() เป็นพารามิเตอร์แรกสุด
+	user, err := h.service.GetUser(c.UserContext(), requesterID, requesterRole, uint(idParam))
 	if err != nil {
 		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -191,7 +192,8 @@ func (h *UserHandler) GetAllUsers(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
-	users, err := h.service.GetAllUsers(domain.Role(roleStr))
+	// 🚀 เพิ่ม c.UserContext() เป็นพารามิเตอร์แรกสุด
+	users, err := h.service.GetAllUsers(c.UserContext(), domain.Role(roleStr))
 	if err != nil {
 		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -233,7 +235,8 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		updateData.Role = domain.Role(*input.Role)
 	}
 
-	err := h.service.UpdateUser(requesterID, requesterRole, uint(idParam), updateData)
+	// 🚀 เพิ่ม c.UserContext() เป็นพารามิเตอร์แรกสุด
+	err := h.service.UpdateUser(c.UserContext(), requesterID, requesterRole, uint(idParam), updateData)
 	if err != nil {
 		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
 	}
