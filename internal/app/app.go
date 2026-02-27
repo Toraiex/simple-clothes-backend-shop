@@ -1,6 +1,8 @@
 package app
 
 import (
+	"simple-clothes-shop/internal/handler"
+	"simple-clothes-shop/internal/repository"
 	database "simple-clothes-shop/pkg/database"
 
 	"github.com/gofiber/fiber/v2"
@@ -23,7 +25,10 @@ func NewApp() *App {
 		Password: "",               // ปล่อยว่างถ้าไม่ได้ตั้งรหัส
 		DB:       0,                // ใช้ DB 0
 	})
+	cacheRepo := repository.NewCacheRepository(rdb)
 	handlers := NewHandlersContainer(db, rdb)
+	authMid := handler.NewAuthMiddleware(cacheRepo)
+	adminMid := handler.IsAdmin()
 	app := fiber.New()
 
 	app.Use(
@@ -39,7 +44,7 @@ func NewApp() *App {
 		return c.SendString("Server Running")
 	})
 
-	setupRoutes(app, handlers)
+	setupRoutes(app, handlers, authMid, adminMid)
 
 	return &App{fiber: app}
 }
