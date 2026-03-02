@@ -35,6 +35,8 @@ func setupRoutes(app *fiber.App, h *HandlersContainer, authMid fiber.Handler, ad
 	api.Post("/reset-password", h.User.ResetPassword)
 
 	// 🚀 เปลี่ยน handler.AuthMiddleware เป็น authMid และ handler.IsAdmin เป็น adminMid
+	userGroup := api.Group("users")
+	userGroup.Get("/", h.User.GetAllUsers) // /api/users/
 	api.Get("/users", authMid, adminMid, h.User.GetAllUsers)
 	api.Get("/users/:id", authMid, h.User.GetUser)
 	api.Patch("/users/:id", authMid, h.User.UpdateUser)
