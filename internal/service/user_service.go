@@ -1,31 +1,41 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"math/rand"
 	"os"
+	"strconv"
 	"time"
 
 	"simple-clothes-shop/internal/domain"
+	"simple-clothes-shop/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type userService struct {
-	repo domain.UserRepository
+	userRepo         domain.UserRepository
+	cacheRepo        repository.CacheRepository
+	emailSvc         EmailService
+	jwtAccessSecret  string
+	jwtRefreshSecret string
 }
 
-func NewUserService(repo domain.UserRepository) domain.UserService {
-	return &userService{repo: repo}
+func NewUserService(userRepo domain.UserRepository, cacheRepo repository.CacheRepository, emailSvc EmailService) domain.UserService {
+	return &userService{
+		userRepo:         userRepo,
+		cacheRepo:        cacheRepo,
+		emailSvc:         emailSvc,
+		jwtAccessSecret:  os.Getenv("JWT_ACCESS_SECRET"),
+		jwtRefreshSecret: os.Getenv("JWT_REFRESH_SECRET"),
+	}
 }
 
-// ==========================================
-// 1. ลงทะเบียน (Register)
-// ==========================================
-func (s *userService) Register(user *domain.User) error {
-
-	// ✅ check username ซ้ำก่อน
-	existing, _ := s.repo.GetByUsername(user.Username)
+func (s *userService) Register(ctx context.Context, user *domain.User) error {
+	existing, _ := s.userRepo.GetByUsername(ctx, user.Username)
 	if existing != nil {
 		return errors.New("username already exists")
 	}
@@ -34,113 +44,269 @@ func (s *userService) Register(user *domain.User) error {
 		user.Role = domain.RoleUser
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 14)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 10)
+	if err != nil {
+		return err
+	}
+	user.Password = string(hashedPassword)
+	user.IsVerified = false
+
+	err = s.userRepo.Create(ctx, user)
 	if err != nil {
 		return err
 	}
 
-	user.Password = string(hashedPassword)
+	if user.Email != "" {
+		otp := generateOTP()
+		err = s.cacheRepo.SaveOTP(ctx, user.Email, otp)
+		if err != nil {
+			return err
+		}
 
-	return s.repo.Create(user)
-}
-
-// ==========================================
-// 2. เข้าสู่ระบบ (Login)
-// ==========================================
-func (s *userService) Login(username, password string) (string, string, error) {
-	// 1. ค้นหา User จาก Username
-	user, err := s.repo.GetByUsername(username)
-	if err != nil {
-		return "", "", errors.New("ไม่พบชื่อผู้ใช้งานนี้")
+		go func(targetEmail string, targetOTP string) {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Println("⚠️ [Recovered] Email sending panic:", r)
+				}
+			}()
+			_ = s.emailSvc.SendVerificationEmail(targetEmail, targetOTP)
+		}(user.Email, otp)
 	}
 
-	// 2. เช็คว่ารหัสผ่านตรงกันไหม (เทียบ Hash)
+	return nil
+}
+
+func (s *userService) Login(ctx context.Context, username, password string) (string, string, string, error) {
+	user, err := s.userRepo.GetByUsername(ctx, username)
+	if err != nil {
+		return "", "", "", errors.New("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง")
+	}
+
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
-		return "", "", errors.New("รหัสผ่านไม่ถูกต้อง")
-
+		return "", "", "", errors.New("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง")
 	}
 
-	// 3. ถ้าผ่านหมด -> สร้าง JWT Token (บัตรผ่าน)
-
-	token := jwt.New(jwt.SigningMethodHS256)
-	claims := token.Claims.(jwt.MapClaims)
-
-	claims["user_id"] = user.ID
-	claims["role"] = user.Role
-	claims["exp"] = time.Now().Add(time.Hour * 72).Unix() // หมดอายุใน 3 วัน
-
-	// เซ็นชื่อกำกับด้วย Secret Key (จาก .env)
-	t, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"role":    user.Role,
+		"exp":     time.Now().Add(15 * time.Minute).Unix(),
+	})
+	accessToken, err := accessTokenObj.SignedString([]byte(s.jwtAccessSecret))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
-	// คืนค่า Token และ Role กลับไป
-	return t, string(user.Role), nil
-}
-func (s *userService) GetUserByID(id uint) (*domain.User, error) {
-	return s.repo.GetByID(id)
-}
-
-func (s *userService) GetUser(requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
-	if requesterRole != "admin" && requesterID != targetID {
-		return nil, errors.New("forbidden")
+	refreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
+	})
+	refreshToken, err := refreshTokenObj.SignedString([]byte(s.jwtRefreshSecret))
+	if err != nil {
+		return "", "", "", err
 	}
 
-	return s.repo.GetByID(targetID)
+	err = s.cacheRepo.SaveSession(ctx, refreshToken, user.ID, 7*24*time.Hour)
+	if err != nil {
+		return "", "", "", errors.New("ไม่สามารถสร้างเซสชันได้")
+	}
+
+	return accessToken, refreshToken, string(user.Role), nil
 }
 
-// ... (ฟังก์ชัน Register และ Login เหมือนเดิม) ...
-
-// ==========================================
-// 3. ดึงรายชื่อทั้งหมด (เฉพาะ Admin)
-// ==========================================
-func (s *userService) GetAllUsers(requesterRole domain.Role) ([]*domain.User, error) {
+func (s *userService) GetAllUsers(ctx context.Context, requesterRole domain.Role) ([]*domain.User, error) {
 	if requesterRole != domain.RoleAdmin {
 		return nil, errors.New("forbidden: สิทธิ์การเข้าถึงถูกปฏิเสธ เฉพาะผู้ดูแลระบบเท่านั้น")
 	}
-	return s.repo.GetAll()
+	return s.userRepo.GetAll(ctx)
 }
 
-// ==========================================
-// 4. อัปเดตข้อมูลผู้ใช้งาน (ทำ Partial Update)
-// ==========================================
-func (s *userService) UpdateUser(requesterID uint, requesterRole domain.Role, targetID uint, input *domain.User) error {
-
-	// 1. ตรวจสอบสิทธิ์: ต้องเป็น Admin หรือ เป็นเจ้าของบัญชีตัวเองเท่านั้น
-	if requesterRole != domain.RoleAdmin && requesterID != targetID {
-		return errors.New("forbidden: คุณไม่มีสิทธิ์แก้ไขข้อมูลของผู้อื่น")
-	}
-
-	// 2. FETCH: ดึงข้อมูลผู้ใช้งานเดิมจาก Database ขึ้นมาก่อน
-	existingUser, err := s.repo.GetByID(targetID)
+func (s *userService) UpdateUser(ctx context.Context, requesterID uint, requesterRole domain.Role, targetID uint, input *domain.User) error {
+	current, err := s.userRepo.GetByID(ctx, targetID)
 	if err != nil {
 		return errors.New("ไม่พบข้อมูลผู้ใช้งานนี้ในระบบ")
 	}
 
-	// 3. PATCH: อัปเดตข้อมูล "เฉพาะฟิลด์ที่มีการส่งค่ามาใหม่" (ถ้าไม่ส่งมา ให้ใช้ค่าเดิม)
+	if requesterRole != domain.RoleAdmin && requesterID != targetID {
+		return errors.New("forbidden: คุณไม่มีสิทธิ์แก้ไขข้อมูลของผู้อื่น")
+	}
+
 	if input.Address != "" {
-		existingUser.Address = input.Address
+		current.Address = input.Address
 	}
 	if input.Phone != "" {
-		existingUser.Phone = input.Phone
+		current.Phone = input.Phone
 	}
 
-	// 4. ROLE LOGIC: จัดการเรื่องสิทธิ์ (Role) อย่างเข้มงวด
-	if input.Role != "" {
-		// ถ้าคนแก้ไม่ใช่ Admin ห้ามเปลี่ยน Role เด็ดขาด!
-		if requesterRole != domain.RoleAdmin {
-			return errors.New("forbidden: คุณไม่สามารถเปลี่ยนระดับสิทธิ์ (Role) ของตัวเองได้")
+	if input.Role != "" && requesterRole == domain.RoleAdmin {
+		if input.Role == domain.RoleAdmin || input.Role == domain.RoleUser {
+			current.Role = input.Role
 		}
-
-		// ป้องกันการพิมพ์ Role มั่วๆ เข้ามา (เช่น role="hacker")
-		if input.Role != domain.RoleAdmin && input.Role != domain.RoleUser {
-			return errors.New("invalid role: สิทธิ์ต้องเป็น 'admin' หรือ 'user' เท่านั้น")
-		}
-		existingUser.Role = input.Role
 	}
 
-	// 5. SAVE: บันทึกข้อมูลที่ประกอบร่างสมบูรณ์แล้ว กลับลง Database
-	return s.repo.Update(targetID, existingUser)
+	return s.userRepo.Update(ctx, targetID, current)
+}
+
+func (s *userService) GetUser(ctx context.Context, requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
+	if requesterRole != "admin" && requesterID != targetID {
+		return nil, errors.New("forbidden")
+	}
+	return s.userRepo.GetByID(ctx, targetID)
+}
+
+func (s *userService) RefreshAccessToken(ctx context.Context, refreshToken string) (string, string, error) {
+	userIDStr, err := s.cacheRepo.GetSession(ctx, refreshToken)
+	if err != nil {
+		return "", "", errors.New("unauthorized: เซสชันไม่ถูกต้อง หรือหมดอายุแล้ว")
+	}
+
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		return "", "", errors.New("unauthorized: ข้อมูลเซสชันผิดพลาด")
+	}
+
+	user, err := s.userRepo.GetByID(ctx, uint(userID))
+	if err != nil {
+		return "", "", errors.New("unauthorized: ไม่พบข้อมูลผู้ใช้งาน")
+	}
+
+	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"role":    user.Role,
+		"exp":     time.Now().Add(15 * time.Minute).Unix(),
+	})
+	newAccessToken, err := accessTokenObj.SignedString([]byte(s.jwtAccessSecret))
+	if err != nil {
+		return "", "", err
+	}
+
+	newExpiresAt := time.Now().Add(7 * 24 * time.Hour)
+	refreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"exp":     newExpiresAt.Unix(),
+	})
+	newRefreshToken, err := refreshTokenObj.SignedString([]byte(s.jwtRefreshSecret))
+	if err != nil {
+		return "", "", err
+	}
+
+	_ = s.cacheRepo.RevokeSession(ctx, refreshToken)
+	err = s.cacheRepo.SaveSession(ctx, newRefreshToken, user.ID, 7*24*time.Hour)
+	if err != nil {
+		return "", "", errors.New("ไม่สามารถอัปเดตเซสชันได้")
+	}
+
+	return newAccessToken, newRefreshToken, nil
+}
+
+func (s *userService) Logout(ctx context.Context, refreshToken string) error {
+	return s.cacheRepo.RevokeSession(ctx, refreshToken)
+}
+
+func generateOTP() string {
+	return fmt.Sprintf("%06d", rand.Intn(900000)+100000)
+}
+
+func (s *userService) VerifyEmail(ctx context.Context, email string, otp string) error {
+	user, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+	}
+
+	if user.IsVerified {
+		return errors.New("บัญชีนี้ได้รับการยืนยันไปแล้ว")
+	}
+
+	err = s.cacheRepo.VerifyOTP(ctx, email, otp)
+	if err != nil {
+		return err
+	}
+
+	return s.userRepo.UpdateVerificationStatus(ctx, user.ID)
+}
+
+func (s *userService) ResendOTP(ctx context.Context, email string) error {
+	user, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+	}
+
+	newOTP := generateOTP()
+	err = s.cacheRepo.SaveOTP(ctx, email, newOTP)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		_ = s.emailSvc.SendVerificationEmail(user.Email, newOTP)
+	}()
+
+	return nil
+}
+
+func (s *userService) ForgotPassword(ctx context.Context, email string) error {
+	user, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		fmt.Println("⚠️ พยายามขอรีเซ็ตรหัสผ่านแต่อีเมลไม่มีในระบบ:", email)
+		return nil
+	}
+
+	otp := generateOTP()
+	err = s.cacheRepo.SaveOTP(ctx, email, otp)
+	if err != nil {
+		return err
+	}
+
+	go func(targetEmail, targetOTP string) {
+		defer func() {
+			if r := recover(); r != nil {
+			}
+		}()
+		_ = s.emailSvc.SendPasswordResetEmail(targetEmail, targetOTP)
+	}(user.Email, otp)
+
+	return nil
+}
+
+func (s *userService) ResetPassword(ctx context.Context, email, otp, newPassword string) error {
+	user, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		return errors.New("คำขอไม่ถูกต้อง")
+	}
+
+	err = s.cacheRepo.VerifyOTP(ctx, email, otp)
+	if err != nil {
+		return err
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), 10)
+	if err != nil {
+		return err
+	}
+
+	return s.userRepo.UpdatePassword(ctx, user.ID, string(hashedPassword))
+}
+
+func (s *userService) ResendResetOTP(ctx context.Context, email string) error {
+	user, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+	}
+
+	newOTP := generateOTP()
+	err = s.cacheRepo.SaveOTP(ctx, email, newOTP)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("⚠️ [Recovered] Email sending panic in ResendResetOTP:", r)
+			}
+		}()
+		_ = s.emailSvc.SendPasswordResetEmail(user.Email, newOTP)
+	}()
+
+	return nil
 }

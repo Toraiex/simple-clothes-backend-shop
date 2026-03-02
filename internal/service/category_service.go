@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context" // 👈 เพิ่ม context
 	"errors"
 	"strings"
 
@@ -8,32 +9,45 @@ import (
 )
 
 type categoryService struct {
-	repo domain.CategoryRepository
+	repo        domain.CategoryRepository
+	productRepo domain.ProductRepository
 }
 
-func NewCategoryService(repo domain.CategoryRepository) domain.CategoryService {
-	return &categoryService{repo: repo}
+func NewCategoryService(repo domain.CategoryRepository, productRepo domain.ProductRepository) domain.CategoryService {
+	return &categoryService{
+		repo:        repo,
+		productRepo: productRepo,
+	}
 }
 
-func (s *categoryService) FetchAll() ([]domain.Category, error) {
-	return s.repo.GetAll()
+func (s *categoryService) FetchAll(ctx context.Context) ([]domain.Category, error) {
+	return s.repo.GetAll(ctx)
 }
 
-func (s *categoryService) GetCategory(id uint) (*domain.Category, error) {
-	return s.repo.GetByID(id)
+func (s *categoryService) GetCategory(ctx context.Context, id uint) (*domain.Category, error) {
+	category, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// 👈 ส่ง ctx ต่อให้ productRepo ด้วย
+	products, err := s.productRepo.GetByCategoryID(ctx, id)
+	if err == nil {
+		category.Products = products
+	}
+
+	return category, nil
 }
 
-func (s *categoryService) CreateCategory(name string) error {
-	// 1. ลบช่องว่างหน้า-หลังทิ้ง ป้องกันคนพิมพ์สเปซบาร์มาเฉยๆ ("   ")
+func (s *categoryService) CreateCategory(ctx context.Context, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errors.New("ชื่อหมวดหมู่ห้ามเป็นค่าว่าง")
 	}
 
 	category := &domain.Category{Name: name}
-	err := s.repo.Create(category)
+	err := s.repo.Create(ctx, category)
 
-	// 2. จับ Error จาก Database กรณีชื่อซ้ำ
 	if err != nil && strings.Contains(err.Error(), "unique constraint") {
 		return errors.New("ชื่อหมวดหมู่นี้มีอยู่ในระบบแล้ว")
 	}
@@ -41,23 +55,20 @@ func (s *categoryService) CreateCategory(name string) error {
 	return err
 }
 
-func (s *categoryService) UpdateCategory(id uint, name string) error {
-	// 1. ดักค่าว่างเหมือนตอน Create
+func (s *categoryService) UpdateCategory(ctx context.Context, id uint, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errors.New("ชื่อหมวดหมู่ห้ามเป็นค่าว่าง")
 	}
 
-	// 2. Fetch ของเก่ามาดู (โค้ดเดิมคุณทำไว้ดีแล้ว ป้องกันการแก้มั่ว)
-	category, err := s.repo.GetByID(id)
+	category, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return errors.New("ไม่พบหมวดหมู่นี้ในระบบ")
 	}
 
 	category.Name = name
-	err = s.repo.Update(category)
+	err = s.repo.Update(ctx, category)
 
-	// 3. จับ Error ชื่อซ้ำตอนอัปเดต
 	if err != nil && strings.Contains(err.Error(), "unique constraint") {
 		return errors.New("ไม่สามารถเปลี่ยนเป็นชื่อนี้ได้ เนื่องจากมีอยู่ในระบบแล้ว")
 	}
@@ -65,7 +76,6 @@ func (s *categoryService) UpdateCategory(id uint, name string) error {
 	return err
 }
 
-func (s *categoryService) RemoveCategory(id uint) error {
-	// เราใช้ท่า RowsAffected ใน Repo มาแล้ว ตรงนี้ส่งค่า err กลับไปให้ Handler จัดการต่อได้เลย
-	return s.repo.Delete(id)
+func (s *categoryService) RemoveCategory(ctx context.Context, id uint) error {
+	return s.repo.Delete(ctx, id)
 }

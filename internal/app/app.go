@@ -1,11 +1,15 @@
 package app
 
 import (
+	"simple-clothes-shop/internal/handler"
+	"simple-clothes-shop/internal/repository"
 	database "simple-clothes-shop/pkg/database"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/fiber/v2/middleware/requestid"
+	"github.com/redis/go-redis/v9"
 )
 
 type App struct {
@@ -16,26 +20,31 @@ func NewApp() *App {
 	// 1. Connect DB
 	database.Connect()
 	db := database.DB
-
-	handlers := NewHandlersContainer(db)
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "127.0.0.1:6379", // ปกติ Redis รันที่พอร์ตนี้
+		Password: "",               // ปล่อยว่างถ้าไม่ได้ตั้งรหัส
+		DB:       0,                // ใช้ DB 0
+	})
+	cacheRepo := repository.NewCacheRepository(rdb)
+	handlers := NewHandlersContainer(db, rdb)
+	authMid := handler.NewAuthMiddleware(cacheRepo)
+	adminMid := handler.IsAdmin()
 	app := fiber.New()
-	// 4. Middleware
+
 	app.Use(
-		cors.New(cors.Config{
-			AllowOrigins: "*",
-			AllowMethods: "GET,POST,PATCH,DELETE,PUT",
-		}),
+		requestid.New(), // สร้าง ID ให้ทุก Request
 		logger.New(logger.Config{
+			Format:     "${time} | ${pid} | ${locals:requestid} | ${status} | ${latency} | ${method} | ${path}\n",
 			TimeFormat: "2006-01-02 15:04:05",
 			TimeZone:   "Asia/Bangkok",
 		}),
+		recover.New(),
 	)
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Server Running")
 	})
 
-	// 5. Routes
-	setupRoutes(app, handlers)
+	setupRoutes(app, handlers, authMid, adminMid)
 
 	return &App{fiber: app}
 }

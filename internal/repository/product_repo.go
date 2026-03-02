@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context" // 👈 เพิ่ม context
 	"fmt"
 	"simple-clothes-shop/internal/domain"
 
@@ -17,28 +18,23 @@ func NewProductRepository(db *sqlx.DB) domain.ProductRepository {
 	return &productRepository{db: db}
 }
 
-func (r *productRepository) GetAll() ([]domain.Product, error) {
-
+func (r *productRepository) GetAll(ctx context.Context) ([]domain.Product, error) {
 	var products []domain.Product
-
-	err := r.db.Select(&products, `
+	err := r.db.SelectContext(ctx, &products, `
 		SELECT id, name, description, price, stock,
-		       category_id, image, created_at, updated_at
+		       category_id, images, created_at, updated_at
 		FROM products
 		WHERE stock > 0
 		ORDER BY id DESC
 	`)
-
 	return products, err
 }
 
-func (r *productRepository) GetByID(id uint) (*domain.Product, error) {
-
+func (r *productRepository) GetByID(ctx context.Context, id uint) (*domain.Product, error) {
 	var product domain.Product
-
-	err := r.db.Get(&product, `
+	err := r.db.GetContext(ctx, &product, `
 		SELECT id, name, description, price, stock,
-		       category_id, image, created_at, updated_at
+		       category_id, images, created_at, updated_at
 		FROM products
 		WHERE id=$1
 	`, id)
@@ -48,9 +44,8 @@ func (r *productRepository) GetByID(id uint) (*domain.Product, error) {
 	}
 
 	var variants []domain.ProductVariant
-
-	err = r.db.Select(&variants, `
-		SELECT id, product_id, color, size, price, stock
+	err = r.db.SelectContext(ctx, &variants, `
+		SELECT id, product_id, sku, attributes, price, stock, created_at, updated_at
 		FROM product_variants
 		WHERE product_id=$1
 	`, id)
@@ -60,63 +55,53 @@ func (r *productRepository) GetByID(id uint) (*domain.Product, error) {
 	}
 
 	product.Variants = variants
-
 	return &product, nil
 }
 
-func (r *productRepository) GetByCategoryID(categoryID uint) ([]domain.Product, error) {
-
+func (r *productRepository) GetByCategoryID(ctx context.Context, categoryID uint) ([]domain.Product, error) {
 	var products []domain.Product
-
-	err := r.db.Select(&products, `
+	err := r.db.SelectContext(ctx, &products, `
 		SELECT id, name, description, price, stock,
-		       category_id, image, created_at, updated_at
+		       category_id, images, created_at, updated_at
 		FROM products
 		WHERE category_id=$1 AND stock > 0
 		ORDER BY id DESC
 	`, categoryID)
-
 	return products, err
 }
 
-func (r *productRepository) Create(product *domain.Product) error {
-
-	tx, err := r.db.Beginx()
+func (r *productRepository) Create(ctx context.Context, product *domain.Product) error {
+	// 🚀 ใช้ BeginTxx เพื่อให้ Transaction รับ Context ได้
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 
-	err = tx.QueryRow(`
+	err = tx.QueryRowContext(ctx, `
 		INSERT INTO products
-		(name, description, price, stock, category_id, image)
+		(name, description, price, stock, category_id, images)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id
+		RETURNING id, created_at, updated_at
 	`,
-		product.Name,
-		product.Description,
-		product.Price,
-		product.Stock,
-		product.CategoryID,
-		product.Image,
-	).Scan(&product.ID)
+		product.Name, product.Description, product.Price,
+		product.Stock, product.CategoryID, product.Images,
+	).Scan(&product.ID, &product.CreatedAt, &product.UpdatedAt)
 
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 
-	for _, v := range product.Variants {
-		_, err := tx.Exec(`
+	for i := range product.Variants {
+		err := tx.QueryRowContext(ctx, `
 			INSERT INTO product_variants
-			(product_id, color, size, price, stock)
+			(product_id, sku, attributes, price, stock)
 			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id, created_at, updated_at
 		`,
-			product.ID,
-			v.Color,
-			v.Size,
-			v.Price,
-			v.Stock,
-		)
+			product.ID, product.Variants[i].SKU, product.Variants[i].Attributes,
+			product.Variants[i].Price, product.Variants[i].Stock,
+		).Scan(&product.Variants[i].ID, &product.Variants[i].CreatedAt, &product.Variants[i].UpdatedAt)
 
 		if err != nil {
 			tx.Rollback()
@@ -127,48 +112,48 @@ func (r *productRepository) Create(product *domain.Product) error {
 	return tx.Commit()
 }
 
-func (r *productRepository) Update(id uint, product *domain.Product) error {
-	// 1. เริ่ม Transaction (เพราะเราต้องแก้หลายตาราง)
-	tx, err := r.db.Beginx()
+func (r *productRepository) Update(ctx context.Context, id uint, product *domain.Product) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 
-	// 2. อัปเดตข้อมูลสินค้าหลัก (Product)
-	// ใช้ COALESCE หรือเช็คก่อนอัปเดต ถ้าอยากทำ Patch แบบละเอียด แต่ในที่นี้ Update หมดตามฟิลด์ที่ส่งมา
-	_, err = tx.Exec(`
+	err = tx.QueryRowContext(ctx, `
         UPDATE products
-        SET name=$1, description=$2, price=$3, stock=$4, category_id=$5, image=$6, updated_at=NOW()
+        SET name=$1, description=$2, price=$3, stock=$4, category_id=$5, images=$6, updated_at=NOW()
         WHERE id=$7
+        RETURNING updated_at
     `,
 		product.Name, product.Description, product.Price,
-		product.Stock, product.CategoryID, product.Image, id,
-	)
+		product.Stock, product.CategoryID, product.Images, id,
+	).Scan(&product.UpdatedAt)
+
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 
-	// 3. จัดการ Variants (Loop เช็คทีละตัว)
-	for _, v := range product.Variants {
+	for i := range product.Variants {
+		v := &product.Variants[i]
+
 		if v.ID == 0 {
-			// ✅ กรณีที่ 1: ไม่มี ID ส่งมา = "สร้าง Variant ใหม่" (Insert)
-			_, err := tx.Exec(`
-                INSERT INTO product_variants (product_id, color, size, price, stock)
+			err := tx.QueryRowContext(ctx, `
+                INSERT INTO product_variants (product_id, sku, attributes, price, stock)
                 VALUES ($1, $2, $3, $4, $5)
-            `, id, v.Color, v.Size, v.Price, v.Stock)
+                RETURNING id, created_at, updated_at
+            `, id, v.SKU, v.Attributes, v.Price, v.Stock).Scan(&v.ID, &v.CreatedAt, &v.UpdatedAt)
 
 			if err != nil {
 				tx.Rollback()
 				return err
 			}
 		} else {
-			// ✅ กรณีที่ 2: มี ID ส่งมา = "แก้ไข Variant เดิม" (Update)
-			_, err := tx.Exec(`
+			err := tx.QueryRowContext(ctx, `
                 UPDATE product_variants
-                SET color=$1, size=$2, price=$3, stock=$4, updated_at=NOW()
+                SET sku=$1, attributes=$2, price=$3, stock=$4, updated_at=NOW()
                 WHERE id=$5 AND product_id=$6
-            `, v.Color, v.Size, v.Price, v.Stock, v.ID, id)
+                RETURNING updated_at
+            `, v.SKU, v.Attributes, v.Price, v.Stock, v.ID, id).Scan(&v.UpdatedAt)
 
 			if err != nil {
 				tx.Rollback()
@@ -177,34 +162,31 @@ func (r *productRepository) Update(id uint, product *domain.Product) error {
 		}
 	}
 
-	// 4. จบงาน
 	return tx.Commit()
 }
 
-func (r *productRepository) Delete(id uint) error {
-
-	_, err := r.db.Exec(`
-		DELETE FROM products
-		WHERE id=$1
-	`, id)
-
+func (r *productRepository) Delete(ctx context.Context, id uint) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM products WHERE id=$1`, id)
 	return err
 }
 
-// เพิ่มใน productRepository
-func (r *productRepository) DeleteVariant(variantID uint) error {
-	_, err := r.db.Exec(`DELETE FROM product_variants WHERE id=$1`, variantID)
+func (r *productRepository) DeleteVariant(ctx context.Context, variantID uint) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM product_variants WHERE id=$1`, variantID)
 	return err
 }
+
 func (r *productRepository) GetWithFilter(
+	ctx context.Context, // 👈 เพิ่ม ctx
 	categoryID *uint,
 	minPrice *float64,
 	maxPrice *float64,
+	limit int,
+	offset int,
 ) ([]domain.Product, error) {
 
 	query := `
 		SELECT id, name, description, price, stock,
-		       category_id, image, created_at, updated_at
+		       category_id, images, created_at, updated_at
 		FROM products
 		WHERE stock > 0
 	`
@@ -231,9 +213,10 @@ func (r *productRepository) GetWithFilter(
 	}
 
 	query += " ORDER BY id DESC"
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argID, argID+1)
+	args = append(args, limit, offset)
 
 	var products []domain.Product
-
-	err := r.db.Select(&products, query, args...)
+	err := r.db.SelectContext(ctx, &products, query, args...)
 	return products, err
 }

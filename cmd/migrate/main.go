@@ -10,11 +10,10 @@ import (
 )
 
 func main() {
-	// ✅ 1. สร้าง Flag ชื่อ action (ค่าเริ่มต้นคือ "up")
+
 	action := flag.String("action", "up", "Migration action: up, down, drop")
 	flag.Parse()
 
-	// 2. Load .env
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
