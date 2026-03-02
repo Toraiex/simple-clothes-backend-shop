@@ -8,7 +8,7 @@ import (
 	"simple-clothes-shop/internal/domain"
 )
 
-func SeedAdmin(userService domain.UserService, userRepo domain.UserRepository) {
+func SeedAdmin(userService domain.UserUsecase, userRepo domain.UserRepository) {
 
 	username := os.Getenv("ADMIN_USERNAME")
 	password := os.Getenv("ADMIN_PASSWORD")

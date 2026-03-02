@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"simple-clothes-shop/internal/domain"
-	"simple-clothes-shop/internal/repository"
-	"simple-clothes-shop/internal/service"
 	"simple-clothes-shop/pkg/database"
 
 	"github.com/jmoiron/sqlx" // 👈 ต้องใช้สำหรับ *sqlx.DB
@@ -42,7 +40,7 @@ func main() {
 
 	productRepo := repository.NewProductRepository(db)
 	categoryRepo := repository.NewCategoryRepository(db)
-	categoryService := service.NewCategoryService(categoryRepo, productRepo)
+	categoryUsecase := service.NewCategoryUsecase(categoryRepo, productRepo)
 
 	log.Println("🌱 กำลังเริ่มกระบวนการ Seed ข้อมูล...")
 
@@ -51,7 +49,7 @@ func main() {
 	_, _ = db.Exec("TRUNCATE TABLE categories, products, product_variants, cart_items, carts, order_items, orders RESTART IDENTITY CASCADE")
 
 	// 📦 2. สร้าง Categories หลักแบบ Manual
-	seedCleanCategories(categoryService)
+	seedCleanCategories(categoryUsecase)
 
 	// 👕 3. ดึงสินค้าจาก API
 	seedProductsAndVariants(db)
@@ -59,7 +57,7 @@ func main() {
 	log.Println("✅ กระบวนการ Seed ข้อมูลเสร็จสมบูรณ์!")
 }
 
-func seedCleanCategories(svc domain.CategoryService) {
+func seedCleanCategories(svc domain.CategoryUsecase) {
 	log.Println("...กำลังสร้างหมวดหมู่หลัก (Core Categories)")
 
 	coreCategories := []string{

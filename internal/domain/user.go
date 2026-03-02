@@ -37,7 +37,7 @@ type UserRepository interface {
 }
 
 // 3. Service Interface (เชื่อม ctx ทุกตัว)
-type UserService interface {
+type UserUsecase interface {
 	Register(ctx context.Context, user *User) error
 	Login(ctx context.Context, username, password string) (string, string, string, error)
 	GetUser(ctx context.Context, requesterID uint, requesterRole Role, targetID uint) (*User, error)
