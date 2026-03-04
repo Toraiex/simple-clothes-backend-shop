@@ -1,4 +1,4 @@
-package handler
+package http
 
 import (
 	"simple-clothes-shop/internal/domain"
@@ -11,8 +11,18 @@ type CartHandler struct {
 	cartUsecase domain.CartUsecase
 }
 
-func NewCartHandler(cartUsecase domain.CartUsecase) *CartHandler {
-	return &CartHandler{cartUsecase: cartUsecase}
+// 🚀 เพิ่ม Parameters ให้ครบตามที่ router.go ส่งมา และให้มันผูก Route เองเลย
+func NewCartHandler(api fiber.Router, uc domain.CartUsecase, authMid fiber.Handler) {
+	handler := &CartHandler{cartUsecase: uc}
+
+	// 🚀 สร้าง Group สำหรับ Cart
+	cartGroup := api.Group("/cart")
+
+	// 🚀 เอา Route มากางไว้ที่นี่ และใส่ Middleware เข้าไป
+	cartGroup.Get("/", authMid, handler.GetMyCart)
+	cartGroup.Post("/", authMid, handler.AddToCart)
+	cartGroup.Patch("/:id", authMid, handler.UpdateQuantity)
+	cartGroup.Delete("/:id", authMid, handler.RemoveFromCart)
 }
 
 func getUserID(c *fiber.Ctx) (uint, error) {

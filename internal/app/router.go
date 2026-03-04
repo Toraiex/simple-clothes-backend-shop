@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -9,9 +10,9 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	// 💡 1. Import Infrastructure / Middleware
-	"simple-clothes-shop/internal/mail"                 // สมมติว่าพี่ย้ายระบบอีเมลมาไว้ในนี้
-	"simple-clothes-shop/internal/middleware"           // สมมติว่าพี่ย้าย AuthMiddleware ไปไว้ในนี้
-	redisRepo "simple-clothes-shop/internal/repository" // สำหรับ CacheRepo
+	cacheRepo "simple-clothes-shop/internal/cache/repository/redis" // สำหรับ CacheRepo
+	"simple-clothes-shop/internal/mail"                             // สมมติว่าพี่ย้ายระบบอีเมลมาไว้ในนี้
+	"simple-clothes-shop/internal/middleware"                       // สมมติว่าพี่ย้าย AuthMiddleware ไปไว้ในนี้
 
 	// 💡 2. Import แบบ Alias (ตั้งชื่อย่อไม่ให้ตีกัน) ของแต่ละฟีเจอร์
 	userHttp "simple-clothes-shop/internal/user/delivery/http"
@@ -42,11 +43,11 @@ func setupRoutes(app *fiber.App, db *sqlx.DB, rdb *redis.Client) {
 	// ==========================================
 	// ⚙️ 1. Setup Infrastructure & Middlewares
 	// ==========================================
-	cacheRepo := redisRepo.NewCacheRepository(rdb)
+	redisCache := cacheRepo.NewCacheRepository(rdb)
 	emailSvc := mail.NewSMTPMailService() // สร้างบริการส่งอีเมล
 
 	// สร้างยาม (Middlewares)
-	authMid := middleware.NewAuthMiddleware(cacheRepo)
+	authMid := middleware.NewAuthMiddleware(redisCache, os.Getenv("JWT_ACCESS_SECRET"))
 	adminMid := middleware.IsAdmin()
 	authLimiter := limiter.New(limiter.Config{
 		Max:        10,
@@ -62,7 +63,7 @@ func setupRoutes(app *fiber.App, db *sqlx.DB, rdb *redis.Client) {
 
 	// --- 👤 Feature: User ---
 	userRepo := userPostgres.NewUserRepository(db)
-	userUC := userUsecase.NewUserUsecase(userRepo, cacheRepo, emailSvc)
+	userUC := userUsecase.NewUserService(userRepo, redisCache, emailSvc)
 	userHttp.NewUserHandler(api, userUC, authMid, adminMid, authLimiter) // โยน API Router ให้มันผูก Route เอง
 
 	// สร้าง Admin อัตโนมัติ (ถ้าระบบยังไม่มี)

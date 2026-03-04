@@ -8,7 +8,7 @@ import (
 )
 
 type ProductHandler struct {
-	service domain.ProductUsecase
+	usecase domain.ProductUsecase
 }
 
 func NewProductHandler(router fiber.Router, usecase domain.ProductUsecase, authMid fiber.Handler, adminMid fiber.Handler) {
@@ -26,10 +26,6 @@ func NewProductHandler(router fiber.Router, usecase domain.ProductUsecase, authM
 	productGroup.Patch("/:id", authMid, adminMid, handler.Update)
 	productGroup.Delete("/:id", authMid, adminMid, handler.Delete)
 	productGroup.Delete("/variants/:id", authMid, adminMid, handler.DeleteVariant)
-}
-
-func NewProductHandler(service domain.ProductUsecase) *ProductHandler {
-	return &ProductHandler{service: service}
 }
 
 func (h *ProductHandler) GetAll(c *fiber.Ctx) error {

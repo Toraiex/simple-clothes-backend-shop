@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"simple-clothes-shop/internal/cart/usecase"
 	"simple-clothes-shop/internal/domain"
-	"simple-clothes-shop/internal/service"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -108,7 +108,7 @@ func TestAddToCart(t *testing.T) {
 			mockRepo := tc.setupMockRepo()
 
 			// 2. ประกอบร่าง Service
-			cartSvc := service.NewCartUsecase(mockRepo)
+			cartSvc := usecase.NewCartUsecase(mockRepo)
 
 			// 3. สั่งรันฟังก์ชัน
 			err := cartSvc.AddToCart(context.Background(), 1, 55, tc.inputQuantity)

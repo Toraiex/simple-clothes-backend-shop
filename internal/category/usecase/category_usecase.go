@@ -1,4 +1,4 @@
-package postgres // ✅ ใหม่: เปลี่ยนชื่อแพ็กเกจให้ตรงกับโฟลเดอร์
+package usecase
 
 import (
 	"context"

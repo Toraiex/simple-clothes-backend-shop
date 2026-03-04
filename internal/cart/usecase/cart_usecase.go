@@ -6,7 +6,7 @@ import (
 	"simple-clothes-shop/internal/domain"
 )
 
-type CartUsecase struct {
+type cartUsecase struct { // 👈 แก้เป็น c เล็ก
 	cartRepo domain.CartRepository
 }
 

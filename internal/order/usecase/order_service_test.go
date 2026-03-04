@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"simple-clothes-shop/internal/domain"
+	"simple-clothes-shop/internal/order/usecase"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -143,7 +144,7 @@ func TestCheckout(t *testing.T) {
 			mockOrder := tc.setupOrderMock()
 
 			// 2. ประกอบร่าง Order Service (ฉีด Repo ปลอม 2 ตัวเข้าไป)
-			orderSvc := service.NewOrderUsecase(mockOrder, mockCart)
+			orderSvc := usecase.NewOrderUsecase(mockOrder, mockCart)
 
 			// 3. สั่งรันฟังก์ชัน
 			err := orderSvc.Checkout(context.Background(), testUserID)

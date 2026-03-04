@@ -13,11 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// =====================================================================
-// 1. สร้างตัวปลอม (Mock) สำหรับ UserRepo, CacheRepo และ EmailService
-// =====================================================================
-
-// --- 1.1 ตัวปลอมของ UserRepository ---
 type mockUserRepo struct {
 	mockGetByUsername    *domain.User
 	mockGetByUsernameErr error

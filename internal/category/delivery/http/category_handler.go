@@ -10,11 +10,21 @@ import (
 )
 
 type CategoryHandler struct {
-	service domain.CategoryUsecase
+	usecase domain.CategoryUsecase
 }
 
-func NewCategoryHandler(service domain.CategoryUsecase) *CategoryHandler {
-	return &CategoryHandler{service: service}
+func NewCategoryHandler(api fiber.Router, uc domain.CategoryUsecase, authMid fiber.Handler, adminMid fiber.Handler) {
+	handler := &CategoryHandler{usecase: uc}
+
+	// ประกาศเส้นทาง (Routes) ไว้ในนี้เลย
+	catGroup := api.Group("/categories")
+	catGroup.Get("/", handler.GetAll)
+	catGroup.Get("/:id", handler.GetByID)
+
+	// อันที่ต้องใช้ Auth ก็ใส่ Middleware เข้าไป
+	catGroup.Post("/", authMid, adminMid, handler.Create)
+	catGroup.Put("/:id", authMid, adminMid, handler.Update)
+	catGroup.Delete("/:id", authMid, adminMid, handler.Delete)
 }
 
 func (h *CategoryHandler) GetAll(c *fiber.Ctx) error {

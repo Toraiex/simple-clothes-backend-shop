@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"simple-clothes-shop/internal/domain"
+	"simple-clothes-shop/internal/product/usecase"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -111,7 +112,7 @@ func TestCreateProduct(t *testing.T) {
 			mockProd := &mockProductRepoForTest{}
 			mockCat := &mockCategoryRepoForProd{}
 
-			prodSvc := service.NewProductUsecase(mockProd, mockCat)
+			prodSvc := usecase.NewProductUsecase(mockProd, mockCat)
 
 			err := prodSvc.CreateProduct(context.Background(), tc.inputProduct)
 

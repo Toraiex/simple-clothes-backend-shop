@@ -1,4 +1,4 @@
-package postgres
+package usecase
 
 import (
 	"context" // 👈 เพิ่ม context

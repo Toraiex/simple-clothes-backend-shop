@@ -8,11 +8,18 @@ import (
 )
 
 type OrderHandler struct {
-	service domain.OrderUsecase
+	usecase domain.OrderUsecase
 }
 
-func NewOrderHandler(service domain.OrderUsecase) *OrderHandler {
-	return &OrderHandler{service: service}
+func NewOrderHandler(router fiber.Router, service domain.OrderUsecase, authMid fiber.Handler, adminMid fiber.Handler) {
+	handler := &OrderHandler{usecase: service}
+
+	orderGroup := router.Group("/orders")
+	orderGroup.Post("/checkout", authMid, handler.Checkout)
+	orderGroup.Get("/me", authMid, handler.GetMyOrders)
+	orderGroup.Get("/:id", authMid, handler.GetByID)
+	orderGroup.Patch("/:id/cancel", authMid, handler.Cancel)
+	orderGroup.Patch("/:id/status", authMid, adminMid, handler.AdminUpdateStatus)
 }
 
 func (h *OrderHandler) Checkout(c *fiber.Ctx) error {
