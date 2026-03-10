@@ -1,1 +1,1 @@
-000004_create_product_variants_table.down.sql
+DROP TABLE IF EXISTS product_variants;

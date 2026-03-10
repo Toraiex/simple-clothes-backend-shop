@@ -44,7 +44,7 @@ type ProductRepository interface {
 	DeleteVariant(ctx context.Context, id uint) error
 }
 
-type ProductService interface {
+type ProductUsecase interface {
 	FetchAll(ctx context.Context) ([]Product, error)
 	FetchByID(ctx context.Context, id uint) (*Product, error)
 	FetchByCategoryID(ctx context.Context, categoryID uint) ([]Product, error)

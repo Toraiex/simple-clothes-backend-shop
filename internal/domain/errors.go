@@ -1,0 +1,32 @@
+package domain
+
+import "errors"
+
+var (
+	// 1. ข้อมูลที่ลูกค้าส่งมาผิดพลาด (HTTP 400 Bad Request)
+	ErrBadParamInput = errors.New("ข้อมูลที่ส่งมาไม่ถูกต้อง หรือไม่ครบถ้วน")
+
+	// 2.  ไม่พบสิ่งที่ตามหา (HTTP 404 Not Found)
+	ErrNotFound = errors.New("ไม่พบข้อมูลที่คุณต้องการในระบบ")
+
+	// 3.  ข้อมูลซ้ำซ้อน / ขัดแย้งกัน (HTTP 409 Conflict)
+	ErrConflict = errors.New("ข้อมูลนี้มีอยู่ในระบบแล้ว หรือเกิดความขัดแย้งกัน")
+
+	// 4.  ปัญหาเรื่องสิทธิ์และการเข้าถึง (HTTP 401 / 403 / 429)
+
+	ErrUnauthorized    = errors.New("กรุณาเข้าสู่ระบบก่อนทำรายการ")
+	ErrForbidden       = errors.New("คุณไม่มีสิทธิ์ในการเข้าถึงส่วนนี้")
+	ErrTooManyRequests = errors.New("คุณทำรายการบ่อยเกินไป กรุณารอสักครู่")
+
+	// 5.  เซิร์ฟเวอร์พัง / ฐานข้อมูลมีปัญหา (HTTP 500)
+
+	ErrInternalServerError = errors.New("ระบบขัดข้อง กรุณาลองใหม่อีกครั้ง")
+
+	// =========================================================
+	// 🌟 พิเศษ: กลุ่มอาการเฉพาะทางของร้าน E-commerce (Business Logic)
+	// =========================================================
+	// ใช้ตอน Checkout แล้วของหมด
+	ErrInsufficientStock = errors.New("สินค้าในสต็อกมีไม่เพียงพอ")
+
+	ErrInvalidName = errors.New("category name cannot be empty")
+)

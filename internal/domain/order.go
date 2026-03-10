@@ -45,7 +45,7 @@ type OrderRepository interface {
 	CancelAndRestoreStock(ctx context.Context, orderID uint) error
 }
 
-type OrderService interface {
+type OrderUsecase interface {
 	Checkout(ctx context.Context, userID uint) error
 	GetByUserID(ctx context.Context, userID uint) ([]Order, error)
 	GetByID(ctx context.Context, id uint) (*Order, error)

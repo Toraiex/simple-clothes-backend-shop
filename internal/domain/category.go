@@ -22,8 +22,7 @@ type CategoryRepository interface {
 	Delete(ctx context.Context, id uint) error
 }
 
-// Service Contract
-type CategoryService interface {
+type CategoryUsecase interface {
 	FetchAll(ctx context.Context) ([]Category, error)
 	GetCategory(ctx context.Context, id uint) (*Category, error)
 	CreateCategory(ctx context.Context, name string) error

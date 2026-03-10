@@ -38,7 +38,7 @@ type CartRepository interface {
 	GetCartItemsWithDetails(ctx context.Context, cartID uint) ([]CartItem, error)
 }
 
-type CartService interface {
+type CartUsecase interface {
 	GetMyCart(ctx context.Context, userID uint) (*Cart, error)
 	AddToCart(ctx context.Context, userID uint, variantID uint, quantity int) error
 	UpdateQuantity(ctx context.Context, userID uint, cartItemID uint, quantity int) error
