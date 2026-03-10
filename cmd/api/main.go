@@ -30,6 +30,5 @@ func main() {
 	fmt.Println("👉 3. กำลังจะสร้าง App (เชื่อมต่อ DB/Redis)")
 	application := app.NewApp()
 
-	fmt.Println("👉 4. สร้าง App เสร็จ กำลังจะรันเซิร์ฟเวอร์")
 	application.Run()
 }
