@@ -1,12 +1,16 @@
 package http
 
 import (
+	// 👈 สำคัญมาก อย่าลืม import ตัวนี้ครับ
+	"fmt"
 	"simple-clothes-shop/internal/domain"
+	"simple-clothes-shop/pkg/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 )
 
+// 💡 1. เอา Helper ตัวเก่งของเรามาแปะไว้ท้ายไฟล์ หรือจะ import จาก pkg ที่เราเคยคุยกันก็ได้ครับ
 type ProductHandler struct {
 	usecase domain.ProductUsecase
 }
@@ -14,14 +18,11 @@ type ProductHandler struct {
 func NewProductHandler(router fiber.Router, usecase domain.ProductUsecase, authMid fiber.Handler, adminMid fiber.Handler) {
 	handler := &ProductHandler{usecase: usecase}
 
-	// 📦 จัดกลุ่ม Route ของ Product
 	productGroup := router.Group("/products")
 
-	// --- Public Routes (ดูสินค้าไม่ต้องล็อกอิน) ---
 	productGroup.Get("/", handler.GetAll)
 	productGroup.Get("/:id", handler.GetByID)
 
-	// --- Admin Routes (จัดการสินค้าต้องเป็น Admin) ---
 	productGroup.Post("/", authMid, adminMid, handler.Create)
 	productGroup.Patch("/:id", authMid, adminMid, handler.Update)
 	productGroup.Delete("/:id", authMid, adminMid, handler.Delete)
@@ -36,7 +37,8 @@ func (h *ProductHandler) GetAll(c *fiber.Ctx) error {
 	if v := c.Query("category_id"); v != "" {
 		id, err := strconv.Atoi(v)
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid category_id"})
+			err = fmt.Errorf("รูปแบบหมวดหมู่ไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+			return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()}) // 💡 2. ใช้ utils.GetStatusCode
 		}
 		temp := uint(id)
 		categoryID = &temp
@@ -45,7 +47,8 @@ func (h *ProductHandler) GetAll(c *fiber.Ctx) error {
 	if v := c.Query("min_price"); v != "" {
 		price, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid min_price"})
+			err = fmt.Errorf("รูปแบบราคาไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+			return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 		}
 		minPrice = &price
 	}
@@ -53,7 +56,8 @@ func (h *ProductHandler) GetAll(c *fiber.Ctx) error {
 	if v := c.Query("max_price"); v != "" {
 		price, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid max_price"})
+			err = fmt.Errorf("รูปแบบราคาไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+			return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 		}
 		maxPrice = &price
 	}
@@ -61,29 +65,34 @@ func (h *ProductHandler) GetAll(c *fiber.Ctx) error {
 	page := c.QueryInt("page", 1)
 	limit := c.QueryInt("limit", 20)
 
-	// 🚀 แทรก c.UserContext()
 	products, err := h.usecase.FetchWithFilter(c.UserContext(), categoryID, minPrice, maxPrice, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		statusCode := utils.GetStatusCode(err)
+		errMsg := err.Error()
+		if statusCode == fiber.StatusInternalServerError {
+			errMsg = domain.ErrInternalServerError.Error()
+		} // 💡 ดัก DB หลุด
+		return c.Status(statusCode).JSON(fiber.Map{"message": errMsg})
 	}
 
-	return c.JSON(fiber.Map{
-		"page":  page,
-		"limit": limit,
-		"data":  products,
-	})
+	return c.JSON(fiber.Map{"page": page, "limit": limit, "data": products})
 }
 
 func (h *ProductHandler) GetByID(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID ไม่ถูกต้อง"})
+		err = fmt.Errorf("ID สินค้าไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	product, err := h.usecase.FetchByID(c.UserContext(), uint(id))
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "ไม่พบสินค้า"})
+		statusCode := utils.GetStatusCode(err)
+		errMsg := err.Error()
+		if statusCode == fiber.StatusInternalServerError {
+			errMsg = domain.ErrInternalServerError.Error()
+		}
+		return c.Status(statusCode).JSON(fiber.Map{"message": errMsg})
 	}
 	return c.JSON(product)
 }
@@ -91,12 +100,17 @@ func (h *ProductHandler) GetByID(c *fiber.Ctx) error {
 func (h *ProductHandler) Create(c *fiber.Ctx) error {
 	var product domain.Product
 	if err := c.BodyParser(&product); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูล JSON ไม่ถูกต้อง"})
+		err = fmt.Errorf("ข้อมูล JSON ไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	if err := h.usecase.CreateProduct(c.UserContext(), &product); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		statusCode := utils.GetStatusCode(err)
+		errMsg := err.Error()
+		if statusCode == fiber.StatusInternalServerError {
+			errMsg = domain.ErrInternalServerError.Error()
+		}
+		return c.Status(statusCode).JSON(fiber.Map{"message": errMsg})
 	}
 
 	return c.Status(201).JSON(product)
@@ -105,12 +119,17 @@ func (h *ProductHandler) Create(c *fiber.Ctx) error {
 func (h *ProductHandler) Delete(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID ไม่ถูกต้อง"})
+		err = fmt.Errorf("ID สินค้าไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	if err := h.usecase.RemoveProduct(c.UserContext(), uint(id)); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "ไม่สามารถลบสินค้าได้"})
+		statusCode := utils.GetStatusCode(err)
+		errMsg := err.Error()
+		if statusCode == fiber.StatusInternalServerError {
+			errMsg = domain.ErrInternalServerError.Error()
+		}
+		return c.Status(statusCode).JSON(fiber.Map{"message": errMsg})
 	}
 	return c.JSON(fiber.Map{"message": "ลบสินค้าเรียบร้อยแล้ว"})
 }
@@ -120,12 +139,17 @@ func (h *ProductHandler) Update(c *fiber.Ctx) error {
 	var product domain.Product
 
 	if err := c.BodyParser(&product); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+		err = fmt.Errorf("ข้อมูล JSON ไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	if err := h.usecase.UpdateProduct(c.UserContext(), uint(id), &product); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		statusCode := utils.GetStatusCode(err)
+		errMsg := err.Error()
+		if statusCode == fiber.StatusInternalServerError {
+			errMsg = domain.ErrInternalServerError.Error()
+		}
+		return c.Status(statusCode).JSON(fiber.Map{"message": errMsg})
 	}
 
 	return c.JSON(fiber.Map{"message": "อัปเดตสินค้าสำเร็จ"})
@@ -134,16 +158,18 @@ func (h *ProductHandler) Update(c *fiber.Ctx) error {
 func (h *ProductHandler) DeleteVariant(c *fiber.Ctx) error {
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ID ไม่ถูกต้อง"})
+		err = fmt.Errorf("ID ตัวเลือกสินค้าไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	err = h.usecase.RemoveVariant(c.UserContext(), uint(id))
 	if err != nil {
-		if err.Error() == "ไม่พบ Variant นี้ในระบบ (ลบไม่สำเร็จ)" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		statusCode := utils.GetStatusCode(err)
+		errMsg := err.Error()
+		if statusCode == fiber.StatusInternalServerError {
+			errMsg = domain.ErrInternalServerError.Error()
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(statusCode).JSON(fiber.Map{"message": errMsg})
 	}
 
 	return c.JSON(fiber.Map{"message": "ลบตัวเลือกสินค้า (Variant) สำเร็จ"})

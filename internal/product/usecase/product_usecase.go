@@ -1,8 +1,9 @@
 package usecase
 
 import (
-	"context" // 👈 เพิ่ม context
+	"context"
 	"errors"
+	"fmt"
 	"simple-clothes-shop/internal/domain"
 )
 
@@ -21,9 +22,13 @@ func NewProductUsecase(repo domain.ProductRepository, catRepo domain.CategoryRep
 func (s *productUsecase) UpdateProduct(ctx context.Context, id uint, product *domain.Product) error {
 	existingProduct, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return errors.New("ไม่พบสินค้าที่ต้องการแก้ไข")
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("ไม่พบสินค้าที่ต้องการแก้ไข: %w", domain.ErrNotFound)
+		}
+		return domain.ErrInternalServerError // 💡 ปิดรอยรั่ว DB
 	}
 
+	// ... (โค้ดอัปเดต Field ย่อยๆ ของคุณ เหมือนเดิมเป๊ะเลยครับ ขอละไว้เพื่อความสั้น) ...
 	if product.Name != "" {
 		existingProduct.Name = product.Name
 	}
@@ -36,51 +41,68 @@ func (s *productUsecase) UpdateProduct(ctx context.Context, id uint, product *do
 	if product.Stock >= 0 {
 		existingProduct.Stock = product.Stock
 	}
+
 	if product.CategoryID != 0 {
-		_, err := s.categoryRepo.GetByID(ctx, product.CategoryID) // 👈 ส่ง ctx ต่อให้ categoryRepo
+		_, err := s.categoryRepo.GetByID(ctx, product.CategoryID)
 		if err != nil {
-			return errors.New("ไม่พบหมวดหมู่สินค้าที่ระบุ")
+			return fmt.Errorf("ไม่พบหมวดหมู่สินค้าที่ระบุ: %w", domain.ErrBadParamInput) // 💡 ห่อ Error ลูกค้าพิมพ์หมวดหมู่ผิด
 		}
 		existingProduct.CategoryID = product.CategoryID
 	}
+
 	if len(product.Images) > 0 {
 		existingProduct.Images = product.Images
 	}
-
 	if len(product.Variants) > 0 {
 		existingProduct.Variants = product.Variants
 	}
 
-	return s.repo.Update(ctx, id, existingProduct)
+	err = s.repo.Update(ctx, id, existingProduct)
+	if err != nil {
+		return domain.ErrInternalServerError
+	}
+	return nil
 }
 
 func (s *productUsecase) CreateProduct(ctx context.Context, product *domain.Product) error {
 	if product.Price <= 0 {
-		return errors.New("ราคาพื้นฐานของสินค้าต้องมากกว่า 0 บาท")
+		return fmt.Errorf("ราคาพื้นฐานของสินค้าต้องมากกว่า 0 บาท: %w", domain.ErrBadParamInput)
 	}
 	if product.Stock < 0 {
-		return errors.New("สต็อกสินค้าไม่สามารถติดลบได้")
+		return fmt.Errorf("สต็อกสินค้าไม่สามารถติดลบได้: %w", domain.ErrBadParamInput)
 	}
 	for _, v := range product.Variants {
 		if v.Price <= 0 {
-			return errors.New("ราคาของสินค้าแต่ละสี/ไซส์ (Variant) ต้องมากกว่า 0 บาท")
+			return fmt.Errorf("ราคาของสินค้าแต่ละสี/ไซส์ (Variant) ต้องมากกว่า 0 บาท: %w", domain.ErrBadParamInput)
 		}
 	}
-	return s.repo.Create(ctx, product)
+
+	err := s.repo.Create(ctx, product)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *productUsecase) RemoveProduct(ctx context.Context, id uint) error {
-	return s.repo.Delete(ctx, id)
+	err := s.repo.Delete(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("ไม่พบสินค้านี้ในระบบ: %w", domain.ErrNotFound)
+		}
+		return domain.ErrInternalServerError
+	}
+	return nil
 }
 
 func (s *productUsecase) FetchAll(ctx context.Context) ([]domain.Product, error) {
 	products, err := s.repo.GetAll(ctx)
 	if err != nil {
-		return nil, err
+		return nil, domain.ErrInternalServerError
 	}
 
 	for i := range products {
-		cat, _ := s.categoryRepo.GetByID(ctx, products[i].CategoryID) // 👈
+		cat, _ := s.categoryRepo.GetByID(ctx, products[i].CategoryID)
 		products[i].Category = cat
 	}
 	return products, nil
@@ -89,10 +111,13 @@ func (s *productUsecase) FetchAll(ctx context.Context) ([]domain.Product, error)
 func (s *productUsecase) FetchByID(ctx context.Context, id uint) (*domain.Product, error) {
 	product, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, fmt.Errorf("ไม่พบสินค้าที่คุณต้องการ: %w", domain.ErrNotFound)
+		}
+		return nil, domain.ErrInternalServerError
 	}
 
-	cat, _ := s.categoryRepo.GetByID(ctx, product.CategoryID) // 👈
+	cat, _ := s.categoryRepo.GetByID(ctx, product.CategoryID)
 	product.Category = cat
 	return product, nil
 }
@@ -100,10 +125,10 @@ func (s *productUsecase) FetchByID(ctx context.Context, id uint) (*domain.Produc
 func (s *productUsecase) FetchByCategoryID(ctx context.Context, categoryID uint) ([]domain.Product, error) {
 	products, err := s.repo.GetByCategoryID(ctx, categoryID)
 	if err != nil {
-		return nil, err
+		return nil, domain.ErrInternalServerError
 	}
 
-	cat, _ := s.categoryRepo.GetByID(ctx, categoryID) // 👈
+	cat, _ := s.categoryRepo.GetByID(ctx, categoryID)
 	for i := range products {
 		products[i].Category = cat
 	}
@@ -114,11 +139,11 @@ func (s *productUsecase) FetchWithFilter(ctx context.Context, categoryID *uint, 
 	offset := (page - 1) * limit
 	products, err := s.repo.GetWithFilter(ctx, categoryID, minPrice, maxPrice, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, domain.ErrInternalServerError
 	}
 
 	for i := range products {
-		cat, _ := s.categoryRepo.GetByID(ctx, products[i].CategoryID) // 👈
+		cat, _ := s.categoryRepo.GetByID(ctx, products[i].CategoryID)
 		products[i].Category = cat
 	}
 	return products, nil
@@ -127,7 +152,10 @@ func (s *productUsecase) FetchWithFilter(ctx context.Context, categoryID *uint, 
 func (s *productUsecase) RemoveVariant(ctx context.Context, variantID uint) error {
 	err := s.repo.DeleteVariant(ctx, variantID)
 	if err != nil {
-		return errors.New("ไม่พบ Variant นี้ในระบบ (ลบไม่สำเร็จ)")
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("ไม่พบ Variant นี้ในระบบ (ลบไม่สำเร็จ): %w", domain.ErrNotFound)
+		}
+		return domain.ErrInternalServerError
 	}
 	return nil
 }

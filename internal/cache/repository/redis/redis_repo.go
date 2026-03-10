@@ -2,14 +2,15 @@ package redis
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
+	"simple-clothes-shop/internal/domain" // 💡 1. นำเข้า domain
+
 	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus" // 💡 2. นำเข้า logrus
 )
 
-// สร้าง Interface ให้ Service เรียกใช้
 type CacheRepository interface {
 	SaveOTP(ctx context.Context, email, otp string) error
 	VerifyOTP(ctx context.Context, email, inputOTP string) error
@@ -35,30 +36,32 @@ func (r *cacheRepository) SaveOTP(ctx context.Context, email, otp string) error 
 	codeKey := fmt.Sprintf("otp:code:%s", email)
 	attemptsKey := fmt.Sprintf("otp:attempts:%s", email)
 
-	// 1. เช็ค Cooldown (60 วิ)
 	if r.rdb.Exists(ctx, cooldownKey).Val() > 0 {
-		return errors.New("กรุณารอ 60 วินาทีก่อนขอรหัสใหม่")
+		// 💡 ห่อ Error เป็น ErrTooManyRequests (429)
+		return fmt.Errorf("กรุณารอ 60 วินาทีก่อนขอรหัสใหม่: %w", domain.ErrTooManyRequests)
 	}
 
-	// 2. เช็ค & บวกจำนวนครั้งที่ขอ (Atomic Increment ป้องกัน Race Condition)
-	// ถ้า Key ไม่มี มันจะเริ่มที่ 0 แล้วบวกเป็น 1 อัตโนมัติ
 	resendCount := r.rdb.Incr(ctx, resendKey).Val()
 
 	if resendCount == 1 {
-		// ถ้าเพิ่งขอครั้งแรก ให้ตั้งเวลาหมดอายุของโควต้าไว้ที่ 15 นาที
 		r.rdb.Expire(ctx, resendKey, 15*time.Minute)
 	} else if resendCount > 5 {
-		return errors.New("คุณขอรหัสบ่อยเกินไป กรุณาลองใหม่ในอีก 15 นาที")
+		// 💡 ห่อ Error เป็น ErrTooManyRequests (429)
+		return fmt.Errorf("คุณขอรหัสบ่อยเกินไป กรุณาลองใหม่ในอีก 15 นาที: %w", domain.ErrTooManyRequests)
 	}
 
-	// 3. ใช้ Pipeline เพื่อเซฟข้อมูลหลายตัวพร้อมกัน (ลด Network Latency)
 	pipe := r.rdb.Pipeline()
 	pipe.Set(ctx, codeKey, otp, 15*time.Minute)
-	pipe.Set(ctx, cooldownKey, "1", 60*time.Second) // ล็อคปุ่ม 60 วิ
-	pipe.Del(ctx, attemptsKey)                      // รีเซ็ตจำนวนครั้งที่ทายผิด
+	pipe.Set(ctx, cooldownKey, "1", 60*time.Second)
+	pipe.Del(ctx, attemptsKey)
 	_, err := pipe.Exec(ctx)
 
-	return err
+	if err != nil {
+		logrus.Error(err) // 🚨 ดัก Log ถ้าระบบ Redis พัง
+		return err
+	}
+
+	return nil
 }
 
 // ==========================================
@@ -68,31 +71,30 @@ func (r *cacheRepository) VerifyOTP(ctx context.Context, email, inputOTP string)
 	codeKey := fmt.Sprintf("otp:code:%s", email)
 	attemptsKey := fmt.Sprintf("otp:attempts:%s", email)
 
-	// 1. เช็คว่ามี OTP ในระบบไหม (หรือหมดอายุไปแล้ว)
 	validOTP, err := r.rdb.Get(ctx, codeKey).Result()
 	if err == redis.Nil {
-		return errors.New("รหัส OTP หมดอายุหรือไม่ถูกต้อง")
+		// 💡 แปลงเป็น Error มาตรฐาน (ลูกค้ากรอกช้าจนหมดเวลา)
+		return fmt.Errorf("รหัส OTP หมดอายุหรือไม่ถูกต้อง: %w", domain.ErrBadParamInput)
 	} else if err != nil {
+		logrus.Error(err)
 		return err
 	}
 
-	// 2. เช็คจำนวนครั้งที่ทายผิด
 	attempts := r.rdb.Get(ctx, attemptsKey).Val()
-	if attempts >= "3" { // ทายผิดครบ 3 ครั้ง
-		r.rdb.Del(ctx, codeKey) // 💣 ทำลาย OTP ทิ้งทันที!
+	if attempts >= "3" {
+		r.rdb.Del(ctx, codeKey)
 		r.rdb.Del(ctx, attemptsKey)
-		return errors.New("คุณระบุรหัสผิดเกินจำนวนที่กำหนด รหัสนี้ถูกยกเลิกแล้ว กรุณาขอใหม่")
+		// 💡 ห่อ Error บอกว่าโดนแบนชั่วคราว (403 Forbidden หรือ 400 ก็ได้)
+		return fmt.Errorf("คุณระบุรหัสผิดเกินจำนวนที่กำหนด รหัสนี้ถูกยกเลิกแล้ว กรุณาขอใหม่: %w", domain.ErrForbidden)
 	}
 
-	// 3. ตรวจสอบความถูกต้อง
 	if validOTP != inputOTP {
-		// ถ้าผิด ให้บวกตัวเลขการทายผิดขึ้น 1 (Atomic)
 		r.rdb.Incr(ctx, attemptsKey)
 		r.rdb.Expire(ctx, attemptsKey, 15*time.Minute)
-		return errors.New("รหัส OTP ไม่ถูกต้อง")
+		// 💡 ห่อ Error ว่าพิมพ์ผิด
+		return fmt.Errorf("รหัส OTP ไม่ถูกต้อง: %w", domain.ErrBadParamInput)
 	}
 
-	// 4. ถ้าถูกต้อง ล้างขยะทิ้งได้เลย
 	r.rdb.Del(ctx, codeKey, attemptsKey)
 	return nil
 }
@@ -102,23 +104,34 @@ func (r *cacheRepository) VerifyOTP(ctx context.Context, email, inputOTP string)
 // ==========================================
 func (r *cacheRepository) SaveSession(ctx context.Context, refreshToken string, userID uint, duration time.Duration) error {
 	key := fmt.Sprintf("session:%s", refreshToken)
-	// เก็บค่า userID ผูกกับ Token และให้ Redis ทำลายตัวเองเมื่อหมดเวลา (duration)
-	return r.rdb.Set(ctx, key, userID, duration).Err()
+	err := r.rdb.Set(ctx, key, userID, duration).Err()
+	if err != nil {
+		logrus.Error(err) // 🚨 ดัก Log
+		return err
+	}
+	return nil
 }
 
 func (r *cacheRepository) RevokeSession(ctx context.Context, refreshToken string) error {
 	key := fmt.Sprintf("session:%s", refreshToken)
-	return r.rdb.Del(ctx, key).Err()
+	err := r.rdb.Del(ctx, key).Err()
+	if err != nil {
+		logrus.Error(err) // 🚨 ดัก Log
+		return err
+	}
+	return nil
 }
 
-// GetSession ทำหน้าที่ดึง userID จาก Redis โดยใช้ Refresh Token เป็น Key
 func (r *cacheRepository) GetSession(ctx context.Context, refreshToken string) (string, error) {
 	key := fmt.Sprintf("session:%s", refreshToken)
 
-	// ดึงค่าจาก Redis
 	val, err := r.rdb.Get(ctx, key).Result()
-	if err != nil {
-		return "", err // ถ้าไม่เจอจะเป็น redis.Nil (ซึ่งจะไปเป็น error ใน Service ต่อ)
+	if err == redis.Nil {
+		// 💡 แปลงเป็น ErrNotFound แบบเงียบๆ ไม่ต้อง Log
+		return "", domain.ErrNotFound
+	} else if err != nil {
+		logrus.Error(err) // 🚨 ดัก Log กรณี Redis ดับ
+		return "", err
 	}
 
 	return val, nil

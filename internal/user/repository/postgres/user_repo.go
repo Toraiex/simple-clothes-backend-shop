@@ -2,9 +2,12 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"simple-clothes-shop/internal/domain"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/sirupsen/logrus" // 💡 สไตล์ bxcodec ใช้ logrus ใน Repo
 )
 
 type userRepository struct {
@@ -25,7 +28,12 @@ func (r *userRepository) Create(ctx context.Context, user *domain.User) error {
 		user.Username, user.Password, user.Role,
 		user.Address, user.Phone, user.Email, user.IsVerified,
 	).Scan(&user.ID)
-	return err
+
+	if err != nil {
+		logrus.Error(err) // 💡 ปริ้น Log ถ้า DB พัง
+		return err
+	}
+	return nil
 }
 
 func (r *userRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
@@ -34,7 +42,12 @@ func (r *userRepository) GetByUsername(ctx context.Context, username string) (*d
 		SELECT id, username, password, role, address, phone, is_verified, email
 		FROM users WHERE username=$1
 	`, username)
+
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		logrus.Error(err) // 💡 ปริ้น Log ถ้าเป็น Error แปลกๆ ที่ไม่ใช่หาไม่เจอ
 		return nil, err
 	}
 	return &user, nil
@@ -47,6 +60,10 @@ func (r *userRepository) GetByID(ctx context.Context, id uint) (*domain.User, er
 		FROM users WHERE id=$1
 	`, id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		logrus.Error(err)
 		return nil, err
 	}
 	return &user, nil
@@ -59,7 +76,11 @@ func (r *userRepository) Update(ctx context.Context, id uint, user *domain.User)
         WHERE id=$4
     `
 	_, err := r.db.ExecContext(ctx, query, user.Address, string(user.Role), user.Phone, id)
-	return err
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+	return nil
 }
 
 func (r *userRepository) GetAll(ctx context.Context) ([]*domain.User, error) {
@@ -69,6 +90,7 @@ func (r *userRepository) GetAll(ctx context.Context) ([]*domain.User, error) {
 		FROM users ORDER BY id ASC
 	`)
 	if err != nil {
+		logrus.Error(err)
 		return nil, err
 	}
 	return users, nil
@@ -81,17 +103,32 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*domain.
         FROM users WHERE email = $1
     `
 	err := r.db.GetContext(ctx, &user, query, email)
-	return &user, err
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		logrus.Error(err)
+		return nil, err
+	}
+	return &user, nil
 }
 
 func (r *userRepository) UpdateVerificationStatus(ctx context.Context, userID uint) error {
 	query := `UPDATE users SET is_verified = true, updated_at = NOW() WHERE id = $1`
 	_, err := r.db.ExecContext(ctx, query, userID)
-	return err
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+	return nil
 }
 
 func (r *userRepository) UpdatePassword(ctx context.Context, userID uint, newPassword string) error {
 	query := `UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.ExecContext(ctx, query, newPassword, userID)
-	return err
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+	return nil
 }

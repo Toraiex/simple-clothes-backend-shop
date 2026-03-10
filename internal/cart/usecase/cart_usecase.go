@@ -1,12 +1,13 @@
 package usecase
 
 import (
-	"context" // 👈 เพิ่ม context
+	"context"
 	"errors"
+	"fmt"
 	"simple-clothes-shop/internal/domain"
 )
 
-type cartUsecase struct { // 👈 แก้เป็น c เล็ก
+type cartUsecase struct {
 	cartRepo domain.CartRepository
 }
 
@@ -19,21 +20,21 @@ func NewCartUsecase(cartRepo domain.CartRepository) domain.CartUsecase {
 }
 
 func (s *cartUsecase) GetMyCart(ctx context.Context, userID uint) (*domain.Cart, error) {
-	cart, err := s.cartRepo.GetCartByUserID(ctx, userID) // 👈 ส่ง ctx ต่อ
+	cart, err := s.cartRepo.GetCartByUserID(ctx, userID)
 	if err != nil {
-		return nil, errors.New("เกิดข้อผิดพลาดในการค้นหาตะกร้าสินค้า")
+		return nil, domain.ErrInternalServerError // 💡 ปิดรอยรั่ว DB
 	}
 
 	if cart == nil {
-		cart, err = s.cartRepo.CreateCart(ctx, userID) // 👈 ส่ง ctx ต่อ
+		cart, err = s.cartRepo.CreateCart(ctx, userID)
 		if err != nil {
-			return nil, errors.New("ไม่สามารถสร้างตะกร้าสินค้าใหม่ได้")
+			return nil, domain.ErrInternalServerError
 		}
 	}
 
-	items, err := s.cartRepo.GetCartItemsWithDetails(ctx, cart.ID) // 👈 ส่ง ctx ต่อ
+	items, err := s.cartRepo.GetCartItemsWithDetails(ctx, cart.ID)
 	if err != nil {
-		return nil, errors.New("เกิดข้อผิดพลาดในการดึงรายการสินค้า")
+		return nil, domain.ErrInternalServerError
 	}
 
 	cart.Items = items
@@ -42,25 +43,43 @@ func (s *cartUsecase) GetMyCart(ctx context.Context, userID uint) (*domain.Cart,
 
 func (s *cartUsecase) AddToCart(ctx context.Context, userID uint, variantID uint, quantity int) error {
 	if quantity <= 0 {
-		return errors.New("จำนวนสินค้าต้องมากกว่า 0")
+		return fmt.Errorf("จำนวนสินค้าต้องมากกว่า 0: %w", domain.ErrBadParamInput) // 💡 ห่อ Error ลูกค้าพิมพ์ผิด
 	}
 
-	cart, err := s.GetMyCart(ctx, userID) // 👈 ส่ง ctx ต่อ
+	cart, err := s.GetMyCart(ctx, userID)
+	if err != nil {
+		return err // ส่งต่อ Error จาก GetMyCart ได้เลย
+	}
+
+	err = s.cartRepo.AddItem(ctx, cart.ID, variantID, quantity)
 	if err != nil {
 		return err
 	}
-
-	return s.cartRepo.AddItem(ctx, cart.ID, variantID, quantity) // 👈 ส่ง ctx ต่อ
+	return nil
 }
 
 func (s *cartUsecase) UpdateQuantity(ctx context.Context, userID uint, cartItemID uint, quantity int) error {
 	if quantity <= 0 {
-		return errors.New("จำนวนสินค้าต้องมากกว่า 0 (หากต้องการนำออก ให้กดปุ่มลบสินค้า)")
+		return fmt.Errorf("จำนวนสินค้าต้องมากกว่า 0 (หากต้องการนำออก ให้กดปุ่มลบสินค้า): %w", domain.ErrBadParamInput)
 	}
 
-	return s.cartRepo.UpdateItemQuantity(ctx, cartItemID, quantity) // 👈 ส่ง ctx ต่อ
+	err := s.cartRepo.UpdateItemQuantity(ctx, cartItemID, quantity)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("ไม่พบรายการสินค้านี้ในตะกร้า: %w", domain.ErrNotFound)
+		}
+		return domain.ErrInternalServerError
+	}
+	return nil
 }
 
 func (s *cartUsecase) RemoveFromCart(ctx context.Context, userID uint, cartItemID uint) error {
-	return s.cartRepo.RemoveItem(ctx, cartItemID) // 👈 ส่ง ctx ต่อ
+	err := s.cartRepo.RemoveItem(ctx, cartItemID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("ไม่พบรายการสินค้านี้ในตะกร้า: %w", domain.ErrNotFound)
+		}
+		return err
+	}
+	return nil
 }

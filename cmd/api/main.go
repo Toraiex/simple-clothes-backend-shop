@@ -1,30 +1,35 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"log/slog"
 	"os"
 
 	"simple-clothes-shop/internal/app"
 
 	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
-	// 1. Load environment (dev)
+
+	fmt.Println("👉 1. เริ่มรันฟังก์ชัน main")
+
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+		logrus.Warn("No .env file found")
 	}
+	fmt.Println("👉 2. โหลด .env เสร็จแล้ว")
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo, // แสดง Log ตั้งแต่ระดับ Info ขึ้นไป (Info, Warn, Error)
+		Level: slog.LevelInfo,
 	}))
-	slog.SetDefault(logger) // บังคับให้ทั้งโปรเจกต์ใช้ Logger ตัวนี้เป็นค่าเริ่มต้น
+	slog.SetDefault(logger)
 
-	slog.Info("Starting API server", slog.String("port", "3000"))
+	logrus.Info("Starting API server on port 3000 🚀")
 
-	// 2. Create app
+	fmt.Println("👉 3. กำลังจะสร้าง App (เชื่อมต่อ DB/Redis)")
 	application := app.NewApp()
 
-	// 3. Run server
+	fmt.Println("👉 4. สร้าง App เสร็จ กำลังจะรันเซิร์ฟเวอร์")
 	application.Run()
 }

@@ -12,13 +12,14 @@ import (
 	"simple-clothes-shop/internal/domain"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/sirupsen/logrus" // 💡 เพิ่ม logrus
 	"golang.org/x/crypto/bcrypt"
 )
 
 type userService struct {
 	userRepo         domain.UserRepository
-	cacheRepo        domain.CacheRepository // ✅ เติม domain. นำหน้า
-	emailSvc         domain.EmailService    // ✅ เติม domain. นำหน้า
+	cacheRepo        domain.CacheRepository
+	emailSvc         domain.EmailService
 	jwtAccessSecret  string
 	jwtRefreshSecret string
 }
@@ -34,18 +35,17 @@ func NewUserService(userRepo domain.UserRepository, cacheRepo domain.CacheReposi
 }
 
 func (s *userService) Register(ctx context.Context, user *domain.User) error {
-	existing, _ := s.userRepo.GetByUsername(ctx, user.Username)
-	if existing != nil {
-		return errors.New("username already exists")
-	}
-
-	if user.Role == "" {
-		user.Role = domain.RoleUser
+	_, err := s.userRepo.GetByUsername(ctx, user.Username)
+	if err == nil {
+		return fmt.Errorf("ชื่อผู้ใช้งาน '%s' มีอยู่ในระบบแล้ว: %w", user.Username, domain.ErrConflict)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 10)
 	if err != nil {
-		return err
+		logrus.Error(err)
+		return domain.ErrInternalServerError
 	}
 	user.Password = string(hashedPassword)
 	user.IsVerified = false
@@ -59,13 +59,14 @@ func (s *userService) Register(ctx context.Context, user *domain.User) error {
 		otp := generateOTP()
 		err = s.cacheRepo.SaveOTP(ctx, user.Email, otp)
 		if err != nil {
-			return err
+			logrus.Error(err)
+			return domain.ErrInternalServerError
 		}
 
 		go func(targetEmail string, targetOTP string) {
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Println("⚠️ [Recovered] Email sending panic:", r)
+					logrus.Errorf("[Recovered] Email sending panic: %v", r)
 				}
 			}()
 			_ = s.emailSvc.SendVerificationEmail(targetEmail, targetOTP)
@@ -78,12 +79,12 @@ func (s *userService) Register(ctx context.Context, user *domain.User) error {
 func (s *userService) Login(ctx context.Context, username, password string) (string, string, string, error) {
 	user, err := s.userRepo.GetByUsername(ctx, username)
 	if err != nil {
-		return "", "", "", errors.New("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง")
+		return "", "", "", fmt.Errorf("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง: %w", domain.ErrUnauthorized)
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
-		return "", "", "", errors.New("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง")
+		return "", "", "", fmt.Errorf("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง: %w", domain.ErrUnauthorized)
 	}
 
 	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -93,7 +94,8 @@ func (s *userService) Login(ctx context.Context, username, password string) (str
 	})
 	accessToken, err := accessTokenObj.SignedString([]byte(s.jwtAccessSecret))
 	if err != nil {
-		return "", "", "", err
+		logrus.Error(err)
+		return "", "", "", domain.ErrInternalServerError
 	}
 
 	refreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -102,12 +104,14 @@ func (s *userService) Login(ctx context.Context, username, password string) (str
 	})
 	refreshToken, err := refreshTokenObj.SignedString([]byte(s.jwtRefreshSecret))
 	if err != nil {
-		return "", "", "", err
+		logrus.Error(err)
+		return "", "", "", domain.ErrInternalServerError
 	}
 
 	err = s.cacheRepo.SaveSession(ctx, refreshToken, user.ID, 7*24*time.Hour)
 	if err != nil {
-		return "", "", "", errors.New("ไม่สามารถสร้างเซสชันได้")
+		logrus.Error(err)
+		return "", "", "", fmt.Errorf("ไม่สามารถสร้างเซสชันได้: %w", domain.ErrInternalServerError)
 	}
 
 	return accessToken, refreshToken, string(user.Role), nil
@@ -115,7 +119,7 @@ func (s *userService) Login(ctx context.Context, username, password string) (str
 
 func (s *userService) GetAllUsers(ctx context.Context, requesterRole domain.Role) ([]*domain.User, error) {
 	if requesterRole != domain.RoleAdmin {
-		return nil, errors.New("forbidden: สิทธิ์การเข้าถึงถูกปฏิเสธ เฉพาะผู้ดูแลระบบเท่านั้น")
+		return nil, fmt.Errorf("สิทธิ์การเข้าถึงถูกปฏิเสธ: %w", domain.ErrForbidden)
 	}
 	return s.userRepo.GetAll(ctx)
 }
@@ -123,11 +127,11 @@ func (s *userService) GetAllUsers(ctx context.Context, requesterRole domain.Role
 func (s *userService) UpdateUser(ctx context.Context, requesterID uint, requesterRole domain.Role, targetID uint, input *domain.User) error {
 	current, err := s.userRepo.GetByID(ctx, targetID)
 	if err != nil {
-		return errors.New("ไม่พบข้อมูลผู้ใช้งานนี้ในระบบ")
+		return fmt.Errorf("ไม่พบข้อมูลผู้ใช้งานนี้ในระบบ: %w", domain.ErrNotFound)
 	}
 
 	if requesterRole != domain.RoleAdmin && requesterID != targetID {
-		return errors.New("forbidden: คุณไม่มีสิทธิ์แก้ไขข้อมูลของผู้อื่น")
+		return fmt.Errorf("คุณไม่มีสิทธิ์แก้ไขข้อมูลของผู้อื่น: %w", domain.ErrForbidden)
 	}
 
 	if input.Address != "" {
@@ -136,7 +140,6 @@ func (s *userService) UpdateUser(ctx context.Context, requesterID uint, requeste
 	if input.Phone != "" {
 		current.Phone = input.Phone
 	}
-
 	if input.Role != "" && requesterRole == domain.RoleAdmin {
 		if input.Role == domain.RoleAdmin || input.Role == domain.RoleUser {
 			current.Role = input.Role
@@ -148,7 +151,7 @@ func (s *userService) UpdateUser(ctx context.Context, requesterID uint, requeste
 
 func (s *userService) GetUser(ctx context.Context, requesterID uint, requesterRole domain.Role, targetID uint) (*domain.User, error) {
 	if requesterRole != "admin" && requesterID != targetID {
-		return nil, errors.New("forbidden")
+		return nil, fmt.Errorf("ไม่มีสิทธิ์เข้าถึง: %w", domain.ErrForbidden)
 	}
 	return s.userRepo.GetByID(ctx, targetID)
 }
@@ -156,17 +159,18 @@ func (s *userService) GetUser(ctx context.Context, requesterID uint, requesterRo
 func (s *userService) RefreshAccessToken(ctx context.Context, refreshToken string) (string, string, error) {
 	userIDStr, err := s.cacheRepo.GetSession(ctx, refreshToken)
 	if err != nil {
-		return "", "", errors.New("unauthorized: เซสชันไม่ถูกต้อง หรือหมดอายุแล้ว")
+		return "", "", fmt.Errorf("เซสชันไม่ถูกต้อง หรือหมดอายุแล้ว: %w", domain.ErrUnauthorized)
 	}
 
 	userID, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil {
-		return "", "", errors.New("unauthorized: ข้อมูลเซสชันผิดพลาด")
+		logrus.Error(err)
+		return "", "", fmt.Errorf("ข้อมูลเซสชันผิดพลาด: %w", domain.ErrUnauthorized)
 	}
 
 	user, err := s.userRepo.GetByID(ctx, uint(userID))
 	if err != nil {
-		return "", "", errors.New("unauthorized: ไม่พบข้อมูลผู้ใช้งาน")
+		return "", "", fmt.Errorf("ไม่พบข้อมูลผู้ใช้งาน: %w", domain.ErrUnauthorized)
 	}
 
 	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -176,7 +180,8 @@ func (s *userService) RefreshAccessToken(ctx context.Context, refreshToken strin
 	})
 	newAccessToken, err := accessTokenObj.SignedString([]byte(s.jwtAccessSecret))
 	if err != nil {
-		return "", "", err
+		logrus.Error(err)
+		return "", "", domain.ErrInternalServerError
 	}
 
 	newExpiresAt := time.Now().Add(7 * 24 * time.Hour)
@@ -186,13 +191,15 @@ func (s *userService) RefreshAccessToken(ctx context.Context, refreshToken strin
 	})
 	newRefreshToken, err := refreshTokenObj.SignedString([]byte(s.jwtRefreshSecret))
 	if err != nil {
-		return "", "", err
+		logrus.Error(err)
+		return "", "", domain.ErrInternalServerError
 	}
 
 	_ = s.cacheRepo.RevokeSession(ctx, refreshToken)
 	err = s.cacheRepo.SaveSession(ctx, newRefreshToken, user.ID, 7*24*time.Hour)
 	if err != nil {
-		return "", "", errors.New("ไม่สามารถอัปเดตเซสชันได้")
+		logrus.Error(err)
+		return "", "", domain.ErrInternalServerError
 	}
 
 	return newAccessToken, newRefreshToken, nil
@@ -209,16 +216,16 @@ func generateOTP() string {
 func (s *userService) VerifyEmail(ctx context.Context, email string, otp string) error {
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+		return fmt.Errorf("ไม่พบอีเมลนี้ในระบบ: %w", domain.ErrNotFound)
 	}
 
 	if user.IsVerified {
-		return errors.New("บัญชีนี้ได้รับการยืนยันไปแล้ว")
+		return fmt.Errorf("บัญชีนี้ได้รับการยืนยันไปแล้ว: %w", domain.ErrConflict)
 	}
 
 	err = s.cacheRepo.VerifyOTP(ctx, email, otp)
 	if err != nil {
-		return err
+		return fmt.Errorf("รหัส OTP ไม่ถูกต้อง: %w", domain.ErrBadParamInput) // ถือว่าลูกค้ากรอกผิด
 	}
 
 	return s.userRepo.UpdateVerificationStatus(ctx, user.ID)
@@ -227,13 +234,15 @@ func (s *userService) VerifyEmail(ctx context.Context, email string, otp string)
 func (s *userService) ResendOTP(ctx context.Context, email string) error {
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+		return fmt.Errorf("ไม่พบอีเมลนี้ในระบบ: %w", domain.ErrNotFound)
 	}
-
 	newOTP := generateOTP()
 	err = s.cacheRepo.SaveOTP(ctx, email, newOTP)
 	if err != nil {
-		return err
+		if errors.Is(err, domain.ErrTooManyRequests) {
+			return err
+		}
+		return domain.ErrInternalServerError
 	}
 
 	go func() {
@@ -246,19 +255,21 @@ func (s *userService) ResendOTP(ctx context.Context, email string) error {
 func (s *userService) ForgotPassword(ctx context.Context, email string) error {
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		fmt.Println("⚠️ พยายามขอรีเซ็ตรหัสผ่านแต่อีเมลไม่มีในระบบ:", email)
+		logrus.Warnf("พยายามขอรีเซ็ตรหัสผ่านแต่อีเมลไม่มีในระบบ: %s", email)
 		return nil
 	}
 
 	otp := generateOTP()
 	err = s.cacheRepo.SaveOTP(ctx, email, otp)
 	if err != nil {
-		return err
+		logrus.Error(err)
+		return domain.ErrInternalServerError
 	}
 
 	go func(targetEmail, targetOTP string) {
 		defer func() {
 			if r := recover(); r != nil {
+				logrus.Errorf("[Recovered] Email sending panic: %v", r)
 			}
 		}()
 		_ = s.emailSvc.SendPasswordResetEmail(targetEmail, targetOTP)
@@ -270,17 +281,18 @@ func (s *userService) ForgotPassword(ctx context.Context, email string) error {
 func (s *userService) ResetPassword(ctx context.Context, email, otp, newPassword string) error {
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		return errors.New("คำขอไม่ถูกต้อง")
+		return fmt.Errorf("คำขอไม่ถูกต้อง: %w", domain.ErrNotFound)
 	}
 
 	err = s.cacheRepo.VerifyOTP(ctx, email, otp)
 	if err != nil {
-		return err
+		return fmt.Errorf("รหัส OTP ไม่ถูกต้องหรือหมดอายุ: %w", domain.ErrBadParamInput)
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), 10)
 	if err != nil {
-		return err
+		logrus.Error(err)
+		return domain.ErrInternalServerError
 	}
 
 	return s.userRepo.UpdatePassword(ctx, user.ID, string(hashedPassword))
@@ -289,19 +301,20 @@ func (s *userService) ResetPassword(ctx context.Context, email, otp, newPassword
 func (s *userService) ResendResetOTP(ctx context.Context, email string) error {
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		return errors.New("ไม่พบอีเมลนี้ในระบบ")
+		return fmt.Errorf("ไม่พบอีเมลนี้ในระบบ: %w", domain.ErrNotFound)
 	}
 
 	newOTP := generateOTP()
 	err = s.cacheRepo.SaveOTP(ctx, email, newOTP)
 	if err != nil {
-		return err
+		logrus.Error(err)
+		return domain.ErrInternalServerError
 	}
 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Println("⚠️ [Recovered] Email sending panic in ResendResetOTP:", r)
+				logrus.Errorf("[Recovered] Email sending panic in ResendResetOTP: %v", r)
 			}
 		}()
 		_ = s.emailSvc.SendPasswordResetEmail(user.Email, newOTP)

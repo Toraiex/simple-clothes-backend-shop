@@ -1,11 +1,15 @@
-package repository
+package postgres
 
 import (
-	"context" // 👈 เพิ่ม context
+	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"simple-clothes-shop/internal/domain"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/sirupsen/logrus" // 💡 1. Import logrus
 )
 
 type productRepository struct {
@@ -27,7 +31,11 @@ func (r *productRepository) GetAll(ctx context.Context) ([]domain.Product, error
 		WHERE stock > 0
 		ORDER BY id DESC
 	`)
-	return products, err
+	if err != nil {
+		logrus.Error(err) // 💡 2. ดัก Log
+		return nil, err
+	}
+	return products, nil
 }
 
 func (r *productRepository) GetByID(ctx context.Context, id uint) (*domain.Product, error) {
@@ -40,6 +48,10 @@ func (r *productRepository) GetByID(ctx context.Context, id uint) (*domain.Produ
 	`, id)
 
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound // 💡 3. แปลงเป็นภาษากลาง
+		}
+		logrus.Error(err)
 		return nil, err
 	}
 
@@ -51,6 +63,7 @@ func (r *productRepository) GetByID(ctx context.Context, id uint) (*domain.Produ
 	`, id)
 
 	if err != nil {
+		logrus.Error(err)
 		return nil, err
 	}
 
@@ -67,21 +80,38 @@ func (r *productRepository) GetByCategoryID(ctx context.Context, categoryID uint
 		WHERE category_id=$1 AND stock > 0
 		ORDER BY id DESC
 	`, categoryID)
-	return products, err
+
+	if err != nil {
+		logrus.Error(err)
+		return nil, err
+	}
+	return products, nil
 }
 
 func (r *productRepository) Create(ctx context.Context, product *domain.Product) error {
-	// 🚀 ใช้ BeginTxx เพื่อให้ Transaction รับ Context ได้
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
+		logrus.Error(err)
 		return err
 	}
 
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO products
-		(name, description, price, stock, category_id, images)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, created_at, updated_at
+		(name,
+		description,
+		price, 
+		stock,
+		category_id,
+		images)
+		VALUES ($1,
+		$2,
+		$3,
+		$4,
+		$5,
+		$6) 
+		RETURNING id, 
+		created_at, 
+		updated_at
 	`,
 		product.Name, product.Description, product.Price,
 		product.Stock, product.CategoryID, product.Images,
@@ -89,14 +119,23 @@ func (r *productRepository) Create(ctx context.Context, product *domain.Product)
 
 	if err != nil {
 		tx.Rollback()
+		logrus.Error(err) // 💡 ดัก Log ก่อน Rollback
 		return err
 	}
 
 	for i := range product.Variants {
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO product_variants
-			(product_id, sku, attributes, price, stock)
-			VALUES ($1, $2, $3, $4, $5)
+			(product_id, 
+			sku, 
+			attributes, 
+			price, 
+			stock)
+			VALUES ($1, 
+			$2,
+			$3, 
+			$4, 
+			$5)
 			RETURNING id, created_at, updated_at
 		`,
 			product.ID, product.Variants[i].SKU, product.Variants[i].Attributes,
@@ -104,17 +143,27 @@ func (r *productRepository) Create(ctx context.Context, product *domain.Product)
 		).Scan(&product.Variants[i].ID, &product.Variants[i].CreatedAt, &product.Variants[i].UpdatedAt)
 
 		if err != nil {
+			if strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "duplicate key") {
+
+				return fmt.Errorf("รหัส SKU นี้มีอยู่ในระบบแล้ว กรุณาใช้รหัสอื่น: %w", domain.ErrConflict)
+			}
 			tx.Rollback()
-			return err
+			logrus.Error(err)
+			return errors.New("ไม่สามารถบันทึกข้อมูลได้: รหัส SKU อาจซ้ำ หรือข้อมูลไม่ถูกต้อง")
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		logrus.Error(err)
+		return err
+	}
+	return nil
 }
 
 func (r *productRepository) Update(ctx context.Context, id uint, product *domain.Product) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
+		logrus.Error(err)
 		return err
 	}
 
@@ -130,6 +179,10 @@ func (r *productRepository) Update(ctx context.Context, id uint, product *domain
 
 	if err != nil {
 		tx.Rollback()
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		logrus.Error(err)
 		return err
 	}
 
@@ -145,6 +198,7 @@ func (r *productRepository) Update(ctx context.Context, id uint, product *domain
 
 			if err != nil {
 				tx.Rollback()
+				logrus.Error(err)
 				return err
 			}
 		} else {
@@ -157,26 +211,56 @@ func (r *productRepository) Update(ctx context.Context, id uint, product *domain
 
 			if err != nil {
 				tx.Rollback()
+				logrus.Error(err)
 				return err
 			}
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		logrus.Error(err)
+		return err
+	}
+	return nil
 }
 
 func (r *productRepository) Delete(ctx context.Context, id uint) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM products WHERE id=$1`, id)
-	return err
+	res, err := r.db.ExecContext(ctx, `DELETE FROM products WHERE id=$1`, id)
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+
+	// 💡 4. เช็คว่ามีแถวถูกลบจริงๆ ไหม (ถ้าสั่ง Delete ID มั่วๆ จะได้พ่น Not Found)
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *productRepository) DeleteVariant(ctx context.Context, variantID uint) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM product_variants WHERE id=$1`, variantID)
-	return err
+	res, err := r.db.ExecContext(ctx, `DELETE FROM product_variants WHERE id=$1`, variantID)
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *productRepository) GetWithFilter(
-	ctx context.Context, // 👈 เพิ่ม ctx
+	ctx context.Context,
 	categoryID *uint,
 	minPrice *float64,
 	maxPrice *float64,
@@ -221,5 +305,9 @@ func (r *productRepository) GetWithFilter(
 
 	var products []domain.Product
 	err := r.db.SelectContext(ctx, &products, query, args...)
-	return products, err
+	if err != nil {
+		logrus.Error(err) // 💡 ดัก Log
+		return nil, err
+	}
+	return products, nil
 }

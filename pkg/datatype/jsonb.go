@@ -11,9 +11,7 @@ import (
 // ----------------------------------------------------
 type JSONStringArray []string
 
-// Scan: แปลงข้อมูลที่อ่านจาก Database (JSONB) ให้กลายเป็น Go Array
 func (a *JSONStringArray) Scan(value interface{}) error {
-	// ดักไว้ก่อน: ถ้าใน DB เป็นค่าว่าง (null) ให้เซ็ตเป็น Array เปล่าๆ ป้องกันแอปพัง
 	if value == nil {
 		*a = []string{}
 		return nil
@@ -25,17 +23,13 @@ func (a *JSONStringArray) Scan(value interface{}) error {
 	return json.Unmarshal(b, a)
 }
 
-// Value: แปลงจาก Go Array ให้กลายเป็น JSONB เพื่อเซฟลง Database
 func (a JSONStringArray) Value() (driver.Value, error) {
 	if a == nil {
-		return json.Marshal([]string{}) // ป้องกันการบันทึกค่า null ลง DB
+		return json.Marshal([]string{})
 	}
 	return json.Marshal(a)
 }
 
-// ----------------------------------------------------
-// 2. JSONAttributes (สำหรับเก็บตัวเลือกสินค้าแบบยืดหยุ่น)
-// ----------------------------------------------------
 type JSONAttributes map[string]string
 
 // Scan: DB -> Go

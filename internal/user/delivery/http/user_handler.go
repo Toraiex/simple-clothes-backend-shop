@@ -1,10 +1,14 @@
 package http
 
 import (
+	"fmt"
 	"regexp"
-	"simple-clothes-shop/internal/domain"
 	"strconv"
 	"time"
+
+	"simple-clothes-shop/internal/domain"
+	"simple-clothes-shop/internal/middleware"
+	"simple-clothes-shop/pkg/utils"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -26,11 +30,10 @@ type UserHandler struct {
 func NewUserHandler(router fiber.Router, usecase domain.UserUsecase, authMid fiber.Handler, adminMid fiber.Handler, authLimiter fiber.Handler) {
 	handler := &UserHandler{usecase: usecase}
 
-	// 📦 จัดกลุ่ม Route ที่เกี่ยวกับ User ทั้งหมด
 	userGroup := router.Group("/users")
-	authGroup := router.Group("/auth") // ถ้าอยากแยก auth ออกมาให้ดูคลีนขึ้น
+	authGroup := router.Group("/auth")
 
-	// --- Public Routes (ไม่ต้องล็อกอิน) ---
+	// --- Public Routes ---
 	authGroup.Post("/register", handler.Register)
 	authGroup.Post("/login", authLimiter, handler.Login)
 	authGroup.Post("/refresh", handler.RefreshToken)
@@ -40,7 +43,7 @@ func NewUserHandler(router fiber.Router, usecase domain.UserUsecase, authMid fib
 	authGroup.Post("/resend-reset-otp", authLimiter, handler.ResendResetOTP)
 	authGroup.Post("/reset-password", handler.ResetPassword)
 
-	// --- Protected Routes (ต้องล็อกอิน) ---
+	// --- Protected Routes ---
 	authGroup.Post("/logout", authMid, handler.Logout)
 
 	userGroup.Get("/:id", authMid, handler.GetUser)
@@ -56,7 +59,6 @@ type VerifyEmailInput struct {
 }
 
 func (h *UserHandler) Register(c *fiber.Ctx) error {
-
 	type RegisterInput struct {
 		Username string `json:"username" validate:"required,min=6,max=20"`
 		Password string `json:"password" validate:"required,min=6,max=20"`
@@ -67,19 +69,20 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 
 	var input RegisterInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+		err = fmt.Errorf("ข้อมูลไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	if err := validate.Struct(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ผ่านเกณฑ์ (เช่น Username ต้องเป็นภาษาอังกฤษ/ตัวเลข 4 ตัวขึ้นไป)"})
+		err = fmt.Errorf("ข้อมูลไม่ผ่านเกณฑ์: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	if !isComplexPassword(input.Password) {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "รหัสผ่านไม่ปลอดภัยพอ: ต้องมีตัวพิมพ์ใหญ่, ตัวพิมพ์เล็ก, ตัวเลข และสัญลักษณ์อย่างน้อย 1 ตัว",
-		})
+		err := fmt.Errorf("รหัสผ่านไม่ปลอดภัยพอ ต้องมีตัวพิมพ์ใหญ่/เล็ก/ตัวเลข/สัญลักษณ์: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
-	// ✅ 5. ถ้าข้อมูลเป๊ะหมด ค่อยประกอบร่างส่งให้ Service (โค้ดส่วนนี้ของคุณเขียนดีแล้วครับ)
+
 	user := domain.User{
 		Username: input.Username,
 		Password: input.Password,
@@ -89,13 +92,10 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 	}
 
 	if err := h.usecase.Register(c.UserContext(), &user); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	return c.Status(201).JSON(fiber.Map{
-		"message": "สมัครสมาชิกสำเร็จ",
-		"user":    user,
-	})
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"message": "สมัครสมาชิกสำเร็จ"})
 }
 
 func (h *UserHandler) Login(c *fiber.Ctx) error {
@@ -106,94 +106,69 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 
 	var input LoginInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้อง"})
+		err = fmt.Errorf("ข้อมูลไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	accessToken, refreshToken, role, err := h.usecase.Login(c.UserContext(), input.Username, input.Password)
 	if err != nil {
-		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	c.Cookie(&fiber.Cookie{
-		Name:     "access_token",
-		Value:    accessToken,
-		Expires:  time.Now().Add(15 * time.Minute),
-		HTTPOnly: true,
-		Secure:   false,
-		SameSite: "lax",
-	})
-
-	c.Cookie(&fiber.Cookie{
-		Name:     "refresh_token",
-		Value:    refreshToken,
-		Expires:  time.Now().Add(7 * 24 * time.Hour),
-		HTTPOnly: true,
-		Secure:   false,
-		SameSite: "lax",
-	})
-
-	return c.JSON(fiber.Map{
-		"message": "เข้าสู่ระบบสำเร็จ",
-		"role":    role,
-	})
+	h.setAuthCookies(c, accessToken, refreshToken)
+	return c.JSON(fiber.Map{"message": "เข้าสู่ระบบสำเร็จ", "role": role})
 }
 
 func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 	refreshToken := c.Cookies("refresh_token")
 	if refreshToken == "" {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized: ไม่พบ Refresh Token"})
+		err := fmt.Errorf("ไม่พบ Refresh Token: %w", domain.ErrUnauthorized)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// ✅ รับ Token ใบใหม่มา 2 ใบ
 	newAccessToken, newRefreshToken, err := h.usecase.RefreshAccessToken(c.UserContext(), refreshToken)
 	if err != nil {
-		h.clearAuthCookies(c) // ท่าไม้ตายเคลียร์คุกกี้ถ้า Refresh Token พัง
-		return c.Status(401).JSON(fiber.Map{"error": err.Error()})
+		h.clearAuthCookies(c)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	c.Cookie(&fiber.Cookie{
-		Name:     "access_token",
-		Value:    newAccessToken,
-		Expires:  time.Now().Add(15 * time.Minute),
-		HTTPOnly: true,
-		Secure:   false,
-		SameSite: "lax",
-	})
-
-	c.Cookie(&fiber.Cookie{
-		Name:     "refresh_token",
-		Value:    newRefreshToken,
-		Expires:  time.Now().Add(7 * 24 * time.Hour), // ยืดอายุคุกกี้ไปอีก 7 วัน
-		HTTPOnly: true,
-		Secure:   false,
-		SameSite: "lax",
-	})
-
-	return c.JSON(fiber.Map{
-		"message": "ต่ออายุ Token และเซสชันสำเร็จ",
-	})
+	h.setAuthCookies(c, newAccessToken, newRefreshToken)
+	return c.JSON(fiber.Map{"message": "ต่ออายุ Token และเซสชันสำเร็จ"})
 }
 
 func (h *UserHandler) GetUser(c *fiber.Ctx) error {
-	idParam, _ := strconv.Atoi(c.Params("id"))
-
-	// ✅ ดึงค่าออกมาเป็น uint ตรงๆ เพราะตอนเซฟใน Middleware เราเซฟเป็น uint ไปแล้ว
-	requesterID, ok := c.Locals("user_id").(uint)
-	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	// 1. ดึงข้อมูลคนรีเควสต์จาก Context ก่อน
+	requesterID, err := middleware.GetUserID(c)
+	if err != nil {
+		err := fmt.Errorf("เซสชันไม่ถูกต้อง: %w", domain.ErrUnauthorized)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// ✅ ดึงค่า Role
-	roleStr, ok := c.Locals("role").(string)
-	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	roleStr, err := middleware.GetUserRole(c)
+	if err != nil {
+		err := fmt.Errorf("เซสชันไม่ถูกต้อง: %w", domain.ErrUnauthorized)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 	requesterRole := domain.Role(roleStr)
 
-	// 🚀 เพิ่ม c.UserContext() เป็นพารามิเตอร์แรกสุด
-	user, err := h.usecase.GetUser(c.UserContext(), requesterID, requesterRole, uint(idParam))
+	paramID := c.Params("id")
+	var targetID uint
+
+	if paramID == "me" {
+		targetID = requesterID
+	} else {
+
+		parsedID, err := strconv.Atoi(paramID)
+		if err != nil {
+			err = fmt.Errorf("รูปแบบ ID ไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+			return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
+		}
+		targetID = uint(parsedID)
+	}
+
+	user, err := h.usecase.GetUser(c.UserContext(), requesterID, requesterRole, targetID)
 	if err != nil {
-		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	user.Password = ""
@@ -203,26 +178,47 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 func (h *UserHandler) GetAllUsers(c *fiber.Ctx) error {
 	roleStr, ok := c.Locals("role").(string)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+		err := fmt.Errorf("เซสชันไม่ถูกต้อง: %w", domain.ErrUnauthorized)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 เพิ่ม c.UserContext() เป็นพารามิเตอร์แรกสุด
 	users, err := h.usecase.GetAllUsers(c.UserContext(), domain.Role(roleStr))
 	if err != nil {
-		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "ดึงข้อมูลผู้ใช้งานสำเร็จ",
-		"data":    users,
-	})
+	return c.JSON(fiber.Map{"message": "ดึงข้อมูลผู้ใช้งานสำเร็จ", "data": users})
 }
 
 func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
-	idParam, _ := strconv.Atoi(c.Params("id"))
-	requesterRole := domain.Role(c.Locals("role").(string))
-	requesterID := c.Locals("user_id").(uint)
+	// 💡 1. ดึง ID และ Role ด้วย Helper ของเรา (ปลอดภัย 100%)
+	requesterID, err := middleware.GetUserID(c)
+	if err != nil {
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
+	}
 
+	roleStr, err := middleware.GetUserRole(c)
+	if err != nil {
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
+	}
+	requesterRole := domain.Role(roleStr)
+
+	// 💡 2. จัดการกับ Params ID (รองรับท่า /users/me ด้วย)
+	paramID := c.Params("id")
+	var targetID uint
+
+	if paramID == "me" {
+		targetID = requesterID
+	} else {
+		parsedID, err := strconv.Atoi(paramID)
+		if err != nil {
+			err = fmt.Errorf("รูปแบบ ID ไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+			return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
+		}
+		targetID = uint(parsedID)
+	}
+
+	// 3. รับและตรวจสอบข้อมูลจาก Body
 	type UpdateInput struct {
 		Address *string `json:"address"`
 		Phone   *string `json:"phone" validate:"omitempty,len=10,numeric"`
@@ -231,13 +227,17 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 
 	var input UpdateInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "JSON ไม่ถูกต้อง"})
-	}
-	if err := validate.Struct(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		err = fmt.Errorf("รูปแบบ JSON ไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// ดึงค่าจาก pointer มาใส่ domain model
+	// (สมมติว่าคุณมีตัวแปร validate ประกาศไว้แล้วระดับ Global ของ package นี้)
+	if err := validate.Struct(&input); err != nil {
+		err = fmt.Errorf("ข้อมูลไม่ตรงตามเงื่อนไข: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
+	}
+
+	// 4. เตรียมข้อมูลสำหรับอัปเดต
 	updateData := &domain.User{}
 	if input.Address != nil {
 		updateData.Address = *input.Address
@@ -249,54 +249,51 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		updateData.Role = domain.Role(*input.Role)
 	}
 
-	// 🚀 เพิ่ม c.UserContext() เป็นพารามิเตอร์แรกสุด
-	err := h.usecase.UpdateUser(c.UserContext(), requesterID, requesterRole, uint(idParam), updateData)
+	// 5. ส่งให้ Usecase จัดการ
+	err = h.usecase.UpdateUser(c.UserContext(), requesterID, requesterRole, targetID, updateData)
 	if err != nil {
-		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{"message": "อัปเดตข้อมูลสำเร็จ"})
 }
+
 func (h *UserHandler) Logout(c *fiber.Ctx) error {
 	refreshToken := c.Cookies("refresh_token")
 	if refreshToken != "" {
-		// 🚀 แก้ไข: เพิ่ม c.UserContext()
 		_ = h.usecase.Logout(c.UserContext(), refreshToken)
 	}
 
-	h.clearAuthCookies(c) // เรียกใช้ Helper ให้โค้ดสั้นลง
-
+	h.clearAuthCookies(c)
 	return c.JSON(fiber.Map{"message": "ออกจากระบบสำเร็จ"})
 }
 
 func (h *UserHandler) VerifyEmail(c *fiber.Ctx) error {
 	var input VerifyEmailInput
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		err = fmt.Errorf("รูปแบบข้อมูลไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แก้ไข: เพิ่ม c.UserContext()
-	err := h.usecase.VerifyEmail(c.UserContext(), input.Email, input.OTP)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	if err := h.usecase.VerifyEmail(c.UserContext(), input.Email, input.OTP); err != nil {
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{"message": "ยินดีด้วย! ยืนยันอีเมลสำเร็จแล้ว ตอนนี้คุณสามารถเข้าสู่ระบบได้เต็มรูปแบบ"})
 }
 
-// ใน user_handler.go
 func (h *UserHandler) ResendOTP(c *fiber.Ctx) error {
 	var input struct {
 		Email string `json:"email" validate:"required,email"`
 	}
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		err = fmt.Errorf("รูปแบบข้อมูลไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แก้ไข: เพิ่ม c.UserContext()
-	err := h.usecase.ResendOTP(c.UserContext(), input.Email)
-	if err != nil {
-		return c.Status(429).JSON(fiber.Map{"error": err.Error()}) // เปลี่ยนเป็น 429 Too Many Requests ให้สมจริง
+	if err := h.usecase.ResendOTP(c.UserContext(), input.Email); err != nil {
+
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{"message": "ส่งรหัส OTP ใหม่ไปที่อีเมลของคุณแล้ว"})
@@ -308,35 +305,33 @@ func (h *UserHandler) ForgotPassword(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
+		err = fmt.Errorf("รูปแบบข้อมูลไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แก้ไข: เพิ่ม c.UserContext()
-	err := h.usecase.ForgotPassword(c.UserContext(), input.Email)
-	if err != nil {
-		return c.Status(429).JSON(fiber.Map{"error": err.Error()})
+	if err := h.usecase.ForgotPassword(c.UserContext(), input.Email); err != nil {
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{"message": "ส่งรหัส OTP สำหรับตั้งรหัสผ่านใหม่ ไปที่อีเมลของคุณแล้ว"})
 }
 
-// 7.1 ขอส่งรหัส OTP สำหรับรีเซ็ตรหัสผ่านซ้ำ (Resend Reset OTP)
 func (h *UserHandler) ResendResetOTP(c *fiber.Ctx) error {
 	var input struct {
 		Email string `json:"email" validate:"required,email"`
 	}
 
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
+		err = fmt.Errorf("รูปแบบข้อมูลไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
-
 	if err := validate.Struct(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้องตามรูปแบบ"})
+		err = fmt.Errorf("ข้อมูลไม่ถูกต้องตามรูปแบบ: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แก้ไข: เพิ่ม c.UserContext()
 	if err := h.usecase.ResendResetOTP(c.UserContext(), input.Email); err != nil {
-		return c.Status(429).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{"message": "ส่งรหัส OTP สำหรับรีเซ็ตรหัสผ่านใหม่ไปที่อีเมลของคุณแล้ว"})
@@ -350,24 +345,27 @@ func (h *UserHandler) ResetPassword(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
+		err = fmt.Errorf("รูปแบบข้อมูลไม่ถูกต้อง: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	if err := validate.Struct(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "ข้อมูลไม่ถูกต้องตามรูปแบบ"})
+		err = fmt.Errorf("ข้อมูลไม่ถูกต้องตามรูปแบบ: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	if !isComplexPassword(input.NewPassword) {
-		return c.Status(400).JSON(fiber.Map{"error": "รหัสผ่านใหม่ต้องมีตัวพิมพ์ใหญ่, ตัวเล็ก, ตัวเลข และสัญลักษณ์"})
+		err := fmt.Errorf("รหัสผ่านใหม่ต้องมีตัวพิมพ์ใหญ่, ตัวเล็ก, ตัวเลข และสัญลักษณ์: %w", domain.ErrBadParamInput)
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
-	// 🚀 แก้ไข: เพิ่ม c.UserContext()
 	if err := h.usecase.ResetPassword(c.UserContext(), input.Email, input.OTP, input.NewPassword); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(utils.GetStatusCode(err)).JSON(fiber.Map{"message": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{"message": "รีเซ็ตรหัสผ่านสำเร็จ! คุณสามารถเข้าสู่ระบบด้วยรหัสผ่านใหม่ได้ทันที"})
 }
+
 func isComplexPassword(pass string) bool {
 	return regexLower.MatchString(pass) &&
 		regexUpper.MatchString(pass) &&
@@ -375,7 +373,25 @@ func isComplexPassword(pass string) bool {
 		regexSpecial.MatchString(pass)
 }
 
-// ผมเพิ่มฟังก์ชันนี้ให้ครับ จะได้ไม่ต้องเขียนเคลียร์คุกกี้ซ้ำๆ
+func (h *UserHandler) setAuthCookies(c *fiber.Ctx, accessToken string, refreshToken string) {
+	c.Cookie(&fiber.Cookie{
+		Name:     "access_token",
+		Value:    accessToken,
+		Expires:  time.Now().Add(15 * time.Minute),
+		HTTPOnly: true,
+		Secure:   false,
+		SameSite: "lax",
+	})
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		Expires:  time.Now().Add(7 * 24 * time.Hour),
+		HTTPOnly: true,
+		Secure:   false,
+		SameSite: "lax",
+	})
+}
+
 func (h *UserHandler) clearAuthCookies(c *fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
@@ -390,3 +406,5 @@ func (h *UserHandler) clearAuthCookies(c *fiber.Ctx) {
 		HTTPOnly: true,
 	})
 }
+
+// 💡 สไตล์ bxcodec: แปลง Error มาตรฐานเป็น Status Code

@@ -2,6 +2,7 @@ package http
 
 import (
 	"simple-clothes-shop/internal/domain"
+	"simple-clothes-shop/internal/middleware" // 💡 Import middleware เข้ามาใช้งาน
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -23,12 +24,12 @@ func NewOrderHandler(router fiber.Router, service domain.OrderUsecase, authMid f
 }
 
 func (h *OrderHandler) Checkout(c *fiber.Ctx) error {
-	userID, ok := c.Locals("user_id").(uint)
-	if !ok {
+	// 💡 ใช้ Helper แทน c.Locals
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": "กรุณาเข้าสู่ระบบ"})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	if err := h.usecase.Checkout(c.UserContext(), userID); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -44,15 +45,19 @@ func (h *OrderHandler) GetByID(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ID คำสั่งซื้อไม่ถูกต้อง"})
 	}
 
-	userID, ok := c.Locals("user_id").(uint)
-	role, roleOk := c.Locals("role").(string)
-	if !ok || !roleOk {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	// 💡 ดึง ID และ Role อย่างปลอดภัย
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "กรุณาเข้าสู่ระบบ"})
+	}
+
+	role, err := middleware.GetUserRole(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "กรุณาเข้าสู่ระบบ"})
 	}
 
 	var order *domain.Order
-	// 🚀 แทรก c.UserContext()
-	if role == "admin" {
+	if role == string(domain.RoleAdmin) { // หรือ == "admin" ก็ได้
 		order, err = h.usecase.GetByID(c.UserContext(), uint(idParam))
 	} else {
 		order, err = h.usecase.GetByIDForUser(c.UserContext(), userID, uint(idParam))
@@ -65,12 +70,11 @@ func (h *OrderHandler) GetByID(c *fiber.Ctx) error {
 }
 
 func (h *OrderHandler) GetMyOrders(c *fiber.Ctx) error {
-	userID, ok := c.Locals("user_id").(uint)
-	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "กรุณาเข้าสู่ระบบ"})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	orders, err := h.usecase.GetByUserID(c.UserContext(), userID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
@@ -79,9 +83,9 @@ func (h *OrderHandler) GetMyOrders(c *fiber.Ctx) error {
 }
 
 func (h *OrderHandler) Cancel(c *fiber.Ctx) error {
-	userID, ok := c.Locals("user_id").(uint)
-	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "กรุณาเข้าสู่ระบบ"})
 	}
 
 	orderID, err := strconv.Atoi(c.Params("id"))
@@ -89,7 +93,6 @@ func (h *OrderHandler) Cancel(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ID คำสั่งซื้อไม่ถูกต้อง"})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	if err := h.usecase.CancelOrder(c.UserContext(), userID, uint(orderID)); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -97,6 +100,7 @@ func (h *OrderHandler) Cancel(c *fiber.Ctx) error {
 }
 
 func (h *OrderHandler) AdminUpdateStatus(c *fiber.Ctx) error {
+	// ไม่ต้องดึง userID เพราะมี AdminMiddleware กันไว้อยู่แล้ว
 	orderID, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "ID คำสั่งซื้อไม่ถูกต้อง"})
@@ -109,7 +113,6 @@ func (h *OrderHandler) AdminUpdateStatus(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "รูปแบบข้อมูลไม่ถูกต้อง"})
 	}
 
-	// 🚀 แทรก c.UserContext()
 	if err := h.usecase.AdminUpdateStatus(c.UserContext(), uint(orderID), domain.OrderStatus(input.Status)); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}

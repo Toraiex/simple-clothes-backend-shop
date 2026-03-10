@@ -1,11 +1,13 @@
 package repository
 
 import (
-	"context" // 👈 เพิ่ม context
+	"context"
+	"database/sql"
 	"errors"
 	"simple-clothes-shop/internal/domain"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/sirupsen/logrus" // 💡 1. Import logrus
 )
 
 type categoryRepository struct {
@@ -24,8 +26,12 @@ func (r *categoryRepository) GetAll(ctx context.Context) ([]domain.Category, err
 		FROM categories
 		ORDER BY id DESC
 	`)
+	if err != nil {
+		logrus.Error(err) // 💡 ดัก Log พัง
+		return nil, err
+	}
 
-	return categories, err
+	return categories, nil
 }
 
 func (r *categoryRepository) GetByID(ctx context.Context, id uint) (*domain.Category, error) {
@@ -38,6 +44,10 @@ func (r *categoryRepository) GetByID(ctx context.Context, id uint) (*domain.Cate
 	`, id)
 
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound // 💡 แปลงเป็นภาษากลาง
+		}
+		logrus.Error(err)
 		return nil, err
 	}
 
@@ -45,13 +55,18 @@ func (r *categoryRepository) GetByID(ctx context.Context, id uint) (*domain.Cate
 }
 
 func (r *categoryRepository) Create(ctx context.Context, category *domain.Category) error {
-	return r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO categories (name)
 		VALUES ($1)
 		RETURNING id, created_at, updated_at
 	`,
 		category.Name,
 	).Scan(&category.ID, &category.CreatedAt, &category.UpdatedAt)
+
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *categoryRepository) Update(ctx context.Context, category *domain.Category) error {
@@ -64,16 +79,16 @@ func (r *categoryRepository) Update(ctx context.Context, category *domain.Catego
 		category.ID,
 	)
 
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *categoryRepository) Delete(ctx context.Context, id uint) error {
-	result, err := r.db.ExecContext(ctx, `
-		DELETE FROM categories
-		WHERE id=$1
-	`, id)
-
+	result, err := r.db.ExecContext(ctx, `DELETE FROM categories WHERE id=$1`, id)
 	if err != nil {
+		logrus.Error(err)
 		return err
 	}
 
@@ -81,9 +96,8 @@ func (r *categoryRepository) Delete(ctx context.Context, id uint) error {
 	if err != nil {
 		return err
 	}
-
 	if rowsAffected == 0 {
-		return errors.New("ไม่พบข้อมูลหมวดหมู่นี้ในระบบ (ลบไม่สำเร็จ)")
+		return domain.ErrNotFound
 	}
 
 	return nil
